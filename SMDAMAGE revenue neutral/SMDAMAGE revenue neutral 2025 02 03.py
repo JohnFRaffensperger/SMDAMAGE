@@ -24,6 +24,10 @@ import os # file management.
 import pickle # saving and retrieving solutions, especially the calibrated Wpt.
 from pulp import * #pulp.pulpTestAll() # to solve the linear programs.
 import time # for timing the run.
+import subprocess # for calling external processes
+import hector_interface # Hector pulse generation functions.
+import wpt_calibration # Wpt calibration functions
+import plotting_utils # Consolidated plotting functions
 
 def dateTimeString(): return time.strftime("%Y%m%d%H%M", time.localtime())
 
@@ -44,9 +48,9 @@ class Scenario(object):
 	def discount_rate(self, periods): return 1.0/(1.0 + self.discount_rate_base)**(periods) 	
 # your_sample_scenario = Scenario(comment = "Contracts", discount_rate = 0.03, initial_temperature = 971.24975, is_revenue_neutral = True, tau = 2.6, is_removal_luc = True, use_updated_Wpt = False)
 
-def getFirstConstrainedYear(): 		return 2125.0 # This selects the SMDAMAGE output file.
+def getFirstConstrainedYear(): 		return 2125.0
 def getNumber_of_bid_years(): 		return 250 # Run this long to avoid end-of-horizon effects. assert (BeginConstraintYear <= StartYear + getNumber_of_bid_years())
-def getOutputDirectory(): 			return "./output/" # Must exist
+def getOutputDirectory(): 			return "./SMDAMAGE revenue neutral/Output/" # Must exist
 def getPeriodsPerYear(): 			return 1 # Not debugged for larger values. Probably dumb, as it imposes a need for floating indices, e.g., 2025.5.
 def getStartYear(): 				return 2025.0 # First year of the auction schedule.
 def getPulseDataLength(): 			return 296 # Pulse data from Hector goes only 296 years. So raising this would understate later warming.
@@ -81,128 +85,7 @@ def experimentTag_to_file_name(scenario):
 def SMDAMAGE_output_file_name(scenario): return getOutputDirectory() + "SMDAMAGE_soln_" + experimentTag_to_file_name(scenario) + ".csv"
 def Hector_output_file_name(scenario): return getOutputDirectory() + "Hector_output_" + experimentTag_to_file_name(scenario) + ".csv"
 
-# =============================================================================================
-# Part II. Getting pulse information from Hector. John F. Raffensperger, 2019. 
-# =============================================================================================
-# This code changes the input to Hector, runs Hector, and reads the output,
-# with a pulse increase in each chemical, one chemical at a time, and then records the change in temperature.
-from math import log10, floor
-import subprocess # Required to call Hector.
-
-# Before you run this code:
-# 	(1) run Hector with \input\hector_rcp26.ini and \input\emissions\rcp26_emissions.ini. You should get \output\outputstream_rcp26.csv. This output file has the base temperature by year.
-# 	(2) Prepare \input\hector_rcp26_pulsed.ini:
-# 		(a) open hector_rcp26.ini, 
-# 		(b) in section [core], replace "run_name=rcp26" with "run_name=rcp26_emissions_pulsed". This tells Hector to write \output\outputstream_rcp26_pulsed.csv.
-# 		(c) replace text "RCP26_emissions.csv" with "RCP26_emissions_pulsed.csv". 
-# 		(d) Save as \input\emissions\rcp26_emissions_pulsed.ini.
-
-# For each greenhouse gas activity, this code will:
-# 	(1) modify RCP26_emissions_pulsed.csv to increase the emission for the chemical for the year 2005;
-#		Why 2005 instead of, say, 2020? Some refrigerants were phased out, so they have 0 emissions in 2020, which means this code wouldn't be able to calculate a pulse for 2020.
-#		In 2005, the world was emitting all the gases at relatively high rates. I guess I could find an average or largest value to pulse if its missing for a year, but let's just use 2005.
-#		Pulse year should not matter in theory, as long as the pulse provides a good signal. However, Hector's output ends in the year 2300, so pulsing in 2200 gives only 100 periods of output.
-# 	(2) run a batch file calling "hector input/hector_rcp26_pulsed.ini > hector_spew_all_chemicals.txt", to get Hector output RCP26_emissions_pulsed.csv;
-#	(3) read RCP26_emissions_pulsed.csv for the temperature by year, subtract those temperatures from the temperatures in outputstream_rcp26.csv
-
-# This reads the existing emission in inputfile (e.g., RCP26_emissions.csv) and increases it in outputfilename (e.g., RCP26_emissions_pulsed.csv).
-# The outputfilename is the new input for Hector.
-def increaseEmission(pulse_year, inputfilename, outputfilename, chemical): 
-	with open (inputfilename, 'r') as inputfile, open (outputfilename, 'w') as outputfile:
-		line_counter = 0
-		previousline = []
-		for line in inputfile:
-			linelist = [item.strip() for item in line.split(',')] 
-			# print (linelist)
-			if line_counter == 3: # i.e., we're on the fourth line reading actual data.
-				if chemical not in linelist:
-					print("Fail with chemical "+ chemical) # Probably should just exit() here, because it means you're trying to pulse a chemical not in the input file.
-					return 'fail', 0.0
-				else: 
-					chemindex = linelist.index(chemical)
-					units = previousline[chemindex]
-			if linelist[0] == str(pulse_year): # Are we at the line with the year to pulse?
-				oldvalue = linelist[chemindex] # Existing emission.
-				linelist[chemindex] = str(0.0)
-				print ("Changed " + chemical + " from " + oldvalue + " to " + linelist[chemindex])
-				outputfile.write(','.join(linelist) + "\n")
-			else: outputfile.write(line)
-			line_counter += 1
-			previousline = linelist
-	return units, -float(oldvalue)
-
-def readTemperatureOutput(outputfilename): # Read the temperature output from Hector.
-	yearlist = []
-	templist = []
-	with open (outputfilename, 'r') as youroutputfile:
-		for line in youroutputfile:
-			fields = line.split(',')
-			if len(fields) >= 5: # temperature global average
-				if fields[4] == 'Tgav':
-					# print (fields[0],fields[5])
-					yearlist.append(int(fields[0]))
-					templist.append(float(fields[5]))
-	return  yearlist, templist
-
-# Output is Pulses_by_chemical.txt, which contains the marginal temperature changes for each chemical.
-# Run once. Then you've got it and don't need to run it again.
-def get_Pulses_from_Hector(): # Output is Pulses_by_chemical.txt in the Hector directory. Move that to your /data/ directory.
-	# Start here.
-	pulse_year = 2005 # Chosen because it's before the phaseout of some refrigerants.
-	pathname = "D:/Work documents/2 Research/Global warming/Numerical Simulation/hector-2.0.1-Windows/"
-	# pathname = "C:/Users/johnr/Documents/Work documents/2 Research/Global warming/Numerical Simulation/hector-2.0.1-Windows/"
-	os.chdir(pathname)
-
-	file_list = {"Hector_ini": "input/hector_rcp26_pulsed.ini", # You should make this in advance. In section [core], replace "run_name=rcp26" with "run_name=rcp26_emissions_pulsed". Replace text "RCP26_emissions.csv" with "RCP26_emissions_pulsed.csv".
-				"Base_emissions_input": "input/emissions/RCP26_emissions.csv", # Supplied with Hector or make it yourself. Constant, should not change.
-				"Base_temperature_output": "output/outputstream_rcp26.csv", # Supplied with Hector or make it yourself. Constant, should not change.
-				"Hector_spew": "hector_spew_all_chemicals.txt", # created here by Hector. Absorbs Hector's command line reactions.
-				"Hector_batch": "run_Hector_all_chemicals_pulsed.bat", # created by this code. Runs Hector on the right files.
-				"Pulsed_emissions_input": "input/emissions/RCP26_emissions_pulsed.csv", # created by Hector when you run this code. Contains the emissions pulse input.
-				"Pulsed_temperature_output": "output/outputstream_rcp26_pulsed.csv", # Created here by Hector. Contains the resulting temperatures from the emissions pulse. Delete the old one, as this code simply appends new lines.
-				"Final_output_file": "Pulses_by_chemical.txt"} # Created by this code. Contains the marginal temperature changes for each chemical. Think of it as outputstream_rcp26_pulsed.csv minus outputstream_rcp26.csv.
-
-	# Create run_hector.bat. Should say something like "hector input/hector_rcp26_pulsed.ini > hector_spew_all_chemicals.txt"
-	with open (file_list["Hector_batch"], 'w') as outputfile: outputfile.write("hector " + file_list["Hector_ini"] + " > " + file_list["Hector_spew"])
-
-	# 1. Read original temperatures.
-	originalyearlist, originaltemplist = readTemperatureOutput(pathname + file_list['Base_temperature_output']) # Code should not change the base temperature file.
-
-	# 2. Create pulse.
-	# Full list of chemicals in Hector.
-	chemicals = ['ffi_emissions', 'luc_emissions', 'CH4_emissions', 'N2O_emissions', 'SOx', 'SO2_emissions', 'CO_emissions', 'NMVOC_emissions', 'NOX_emissions', 'BC_emissions', 'OC_emissions', 'NH3',\
-		'CF4_emissions', 'C2F6_emissions', 'C6F14', 'HFC23_emissions', 'HFC32_emissions', 'HFC4310_emissions', 'HFC125_emissions', 'HFC134a_emissions', 'HFC143a_emissions', 'HFC227ea_emissions', 'HFC245fa_emissions',\
-		'SF6_emissions', 'CFC11_emissions', 'CFC12_emissions', 'CFC113_emissions', 'CFC114_emissions', 'CFC115_emissions', 'CCl4_emissions', 'CH3CCl3_emissions', 'HCF22_emissions', 'HCF141b_emissions',\
-		'HCF142b_emissions', 'halon1211_emissions', 'HALON1202', 'halon1301_emissions', 'halon2402_emissions', 'CH3Br_emissions', 'CH3Cl_emissions']
-
-	# List of chemicals in  SMDAMAGE.
-	# chemicals = ['ffi_emissions', 'CH4_emissions', 'N2O_emissions', 'CF4_emissions', 'C2F6_emissions', 'HFC125_emissions', 'HFC134a_emissions', 'HFC143a_emissions', 'SF6_emissions']
-	for chemical in chemicals:
-		
-		#3. Create an emissions pulse in the emissions input file.
-		units, pulse = increaseEmission(pulse_year, pathname + file_list["Base_emissions_input"], pathname + file_list["Pulsed_emissions_input"], chemical)
-		
-		# 4. Run Hector to find the pulsed temperature. 
-		returnvalue = subprocess.call(pathname + file_list["Hector_batch"], shell=True)
-
-		# 5. Read the pulsed output to get the temperature in each year from the pulse.
-		newyearlist, newtemplist = readTemperatureOutput(pathname + file_list["Pulsed_temperature_output"])
-		temperature_pulse_list = [] # This is the marginal temperatures by year from the pulse emission.
-		for i in range(len(originaltemplist)):
-			if newyearlist[i] >= pulse_year:
-				temperature_pulse_list.append(float(newtemplist[i]) - float(originaltemplist[i]))
-
-		# 6. Save the pulse output.
-		if abs(sum(temperature_pulse_list)) == 0.0: # effect could be positive or negative warming, depending on the gas
-			print ("For " + chemical + ", total pulse effect = %f, NOTHING SAVED." % sum(temperature_pulse_list))
-		else: 	
-			with open (file_list ["Final_output_file"], 'a+') as outputfile: 
-				# Save the chemical name, the size of the pulse, the units, and the list of marginal temperatures.
-				outputfile.write(chemical + ',' + str(-pulse) + ',' + units + ',' + ','.join([str(-p) for p in temperature_pulse_list]) + '\n')
-			print ("For " + chemical + ", total pulse effect = %f" % sum(temperature_pulse_list))
-			print ("Normalized %f" % (sum(temperature_pulse_list)/pulse))
-	print ("Done")
-# get_Pulses_from_Hector() # Output is Pulses_by_chemical.txt in the Hector directory. Move that to your /data/ directory.
+# hector_interface.get_Pulses_from_Hector() # Output is Pulses_by_chemical.txt in the Hector directory. Move that to your /data/ directory.
 # ============================================================================================
 # Part III. SMDAMAGE.
 # ============================================================================================
@@ -210,7 +93,7 @@ def get_Pulses_from_Hector(): # Output is Pulses_by_chemical.txt in the Hector d
 # The year of planting is the "u_emissionperiod". Pulse units are degrees/megatonnes or degrees/kilotonnes, so we have to convolve growth over time.
 def get_Treetype_carbon_removal (Treetypes):
 	Treetype_carbon_removal = {tree: {t: 0.0 for t in range(156)} for tree in Treetypes} # where 156 is the longest tree contract.
-	with open ('../data/Forestry_Sequestration.csv') as forestryfile: # Year, Tonnes/hectare/year Loblolly pine, Tonnes/hectare/year Ponderosa pine	Tonnes/hectare/year Black walnut
+	with open ('./data/Forestry_Sequestration.csv') as forestryfile: # Year, Tonnes/hectare/year Loblolly pine, Tonnes/hectare/year Ponderosa pine	Tonnes/hectare/year Black walnut
 		lines = [line.split(',') for line in forestryfile]
 		for growthyear, line in enumerate(lines[1:]): # For each row, i.e., growth year
 			for treeNumber, carbonRemoval in enumerate(line[1:]): # For each column, i.e., treetype, in the table.
@@ -233,8 +116,8 @@ def get_tree_schedule_carbon_removal (vpt): # Matches the spreadsheet convolutio
 def getPulse(): # Retrieves the marginal change in temperature in each year after a pulse emission.
 	Pulse = {} # [Pulseqty, warming1, warming2, warming3,...]
 	# Get warming effects for 'C2F6', 'CF4', 'CH4', 'Carbon', HFC125', 'HFC134a', 'HFC143a', 'N2O', 'SF6', 'SO2'.
-	# with open('../data/Calibrated_pulses_by_chemical_2025.txt', 'r') as pulsefile:
-	with open('../data/Pulses_by_chemical.txt', 'r') as pulsefile:
+	with open('./data/Calibrated_pulses_by_chemical_2025.txt', 'r') as pulsefile:
+	# with open('../data/Pulses_by_chemical.txt', 'r') as pulsefile:
 		for line in pulsefile: # Each line looks like: ffi_emissions,13.931549999999998,GtC/yr,0.0,...
 			chempulse = line.split(",") # Below, we're copying the annual warming for each period in the year.
 			Pulse[chempulse[0].replace('_emissions','')] = [float(chempulse[1])] + [float(warming) for warming in chempulse[3:] for i in range(getPeriodsPerYear())]
@@ -471,7 +354,7 @@ def run_SMDAMAGE(scenario): # Main function. Solve the SMDAMAGE model to find th
 
 	# All bids in millions of dollars per million tons.
 	# 2.1 Agriculture. $US2022, Mtons C2. Based on Smith P., et ak, 2014: Agriculture, Forestry and Other Land Use (AFOLU). In: Climate Change 2014: Mitigation of Climate Change, Figure 11.17.
-	with open ('../data/Agriculture_bids.csv') as agfile: # Year, Tonnes/hectare/year Loblolly pine, Tonnes/hectare/year Ponderosa pine	Tonnes/hectare/year Black walnut
+	with open ('./data/Agriculture_bids.csv') as agfile: # Year, Tonnes/hectare/year Loblolly pine, Tonnes/hectare/year Ponderosa pine	Tonnes/hectare/year Black walnut
 		lines = [line.split(',') for line in agfile]
 	Bid_Q_Agriculture = [(float (line[0]), float (line[1])) for line in lines[1:]]
 	for t in getBidPeriods():
@@ -483,7 +366,7 @@ def run_SMDAMAGE(scenario): # Main function. Solve the SMDAMAGE model to find th
 
 	# 2.2 Carbon. $/tonne, Marginal Mtons Carbon. From "Sources of data.xlsm", sheet "Carbon bids", columns F,G.
 	# Consider increasing initial quantity of 20 to 1000 or greater.
-	with open('../data/MtC_bid_steps.csv', 'r') as Carbonfile:
+	with open('./data/MtC_bid_steps.csv', 'r') as Carbonfile:
 		lines = [line for line in Carbonfile]
 	for t in getBidPeriods():
 		PT_set.add(('Carbon',t))
@@ -495,7 +378,7 @@ def run_SMDAMAGE(scenario): # Main function. Solve the SMDAMAGE model to find th
 			bidstep += 1
 
 	# 2.3 Seaweed. $/tonne, Marginal Mtons Carbon. From "Sources of data.xlsm", sheet "Seaweed".
-	with open('../data/Seaweed_bids.csv', 'r') as Seaweedfile:
+	with open('./data/Seaweed_bids.csv', 'r') as Seaweedfile:
 		lines = [line for line in Seaweedfile]
 	for t in getBidPeriods():
 		PT_set.add(('Seaweed',t))
@@ -509,7 +392,7 @@ def run_SMDAMAGE(scenario): # Main function. Solve the SMDAMAGE model to find th
 	# Unused bid data: C6F14, HFC-152a, HFC-227ea, HFC-23, HFC245ca, HFC-32, HFC-43_10.
 	# 2.3. Bid data retrieved here: C2F6, CF4, HFC-125, HFC-134a, HFC-143a, SF6.
 	# File is sorted by chemical, year, price increasing.
-	with open('../data/C2F6_CF4_HFC125_HFC134a_HFC143a_SF6_bidsteps.csv', 'r') as chemicalsfile:
+	with open('./data/C2F6_CF4_HFC125_HFC134a_HFC143a_SF6_bidsteps.csv', 'r') as chemicalsfile:
 		lines = [line for line in chemicalsfile]
 		thislist = lines[0].split(',') # header: C2F6 $/kt,C2F6 kt/year,CF4 $/kt,CF4 kt/year,HFC125 $/kt,HFC125 kt/year,HFC134a $/kt,HFC134a kt/year,HFC143a $/kt,HFC143a kt/year,SF6 $/kt,SF6 kt/year
 		# Remember, Chemicals = ['Agriculture', 'Black_walnut', 'C2F6', 'CF4', 'CH4', 'Carbon', 'HFC125', 'HFC134a', 'HFC143a', 'Loblolly_pine', 'N2O', 'Ponderosa_pine', 'Seaweed', 'SF6']
@@ -530,7 +413,7 @@ def run_SMDAMAGE(scenario): # Main function. Solve the SMDAMAGE model to find th
 					Uapt[bidstep,chemicals[c],t] = ktons/float(getPeriodsPerYear()) # Ktons per period.
 
 	# 2.4. CH4_bid_steps.csv.
-	with open('../data/CH4_bid_steps.csv', 'r') as chemicalsfile:
+	with open('./data/CH4_bid_steps.csv', 'r') as chemicalsfile:
 		chemical = 'CH4'
 		lines = [line for line in chemicalsfile]
 		for bidstep, line in enumerate(lines[1:]):
@@ -545,7 +428,7 @@ def run_SMDAMAGE(scenario): # Main function. Solve the SMDAMAGE model to find th
 				Uapt[bidstep,chemical,t] = mtons/float(getPeriodsPerYear())
 
 	# 2.5. N2O_bid_steps.csv.
-	with open('../data/N2O_bid_steps.csv', 'r') as chemicalsfile:
+	with open('./data/N2O_bid_steps.csv', 'r') as chemicalsfile:
 		chemical = 'N2O'
 		lines = [line for line in chemicalsfile]
 		for bidstep, line in enumerate(lines[1:]):
@@ -560,7 +443,7 @@ def run_SMDAMAGE(scenario): # Main function. Solve the SMDAMAGE model to find th
 				Uapt[bidstep,chemical,t] = mtons/float(getPeriodsPerYear()) # Megatons
 
 	# 2.6. Forestry_bid_steps.csv,
-	with open ('../data/Forestry_bid_steps.csv', 'r') as forestryfile: # Tonnes/hectare/year Loblolly pine, Tonnes/hectare/year Ponderosa pine	Tonnes/hectare/year Black walnut
+	with open ('./data/Forestry_bid_steps.csv', 'r') as forestryfile: # Tonnes/hectare/year Loblolly pine, Tonnes/hectare/year Ponderosa pine	Tonnes/hectare/year Black walnut
 		lines = [line.split(',') for line in forestryfile]
 		# units = lines[0] # header: 'Plantable k hectares/year bid qty per crop', '2019 $/hectare Loblolly Pine', '2019 $/hectare ponderosa pine,2019 $/hectare black walnut'.
 		bidstep = 0
@@ -1177,244 +1060,35 @@ def get_Hector_temperature(scenario):
 	return temperature
 
 # Examining output from SMDAMAGE and Hector.
-def plot_temps_SMDAMAGE_and_Hector (scenario, taxedTemperatureChange, actualTemperatureChange, Hector_temperature):
-	mplot.clf()  # Clear the current figure
-	if taxedTemperatureChange == {}:
-		common_years = sorted(set(actualTemperatureChange.keys()).intersection(set(Hector_temperature.keys())))
-		mplot.title("Compare temperature: Actual vs Hector")
-	else:
-		common_years = sorted(set(taxedTemperatureChange.keys()).intersection(set(actualTemperatureChange.keys())).intersection(set(Hector_temperature.keys())))
-		mplot.plot(common_years, [taxedTemperatureChange[year] for year in common_years], label="Taxed temperature change")
-		mplot.title("Compare temperature: Taxed vs Actual vs Hector")
-	
-	mplot.plot(common_years, [actualTemperatureChange[year] for year in common_years], label="SMDAMAGE temperature change")
-	mplot.plot(common_years, [Hector_temperature[year] for year in common_years], label="Hector temperature")
-	mplot.xlabel("Year")
-	mplot.ylabel("Temperature °C")
-	
-	mplot.legend()
-	mplot.savefig(getOutputDirectory() + "Temps_SMDAMAGE_and_Hector_" + experimentTag_to_file_name(scenario) + ".jpg")
-	# mplot.savefig(getOutputDirectory() + "Compare temps " + experimentTag_to_file_name(scenario) + ".svg")
-	# mplot.show()
+# Plotting function moved to plotting_utils.py
 
-# ========================================================================================
-# Part V. If the SMDAMAGE activity schedule did not match the temperature trajectory in Hector, we can adjust the Wpt values in SMDAMAGE.
-# John F Raffensperger. 2022-07-27, 2022-09-10, 2025-01-05.
-# ======================================================================================== 
-# Examining Wpt from Hector (Pulse) and SMDAMAGE_Fit_W.
-def plot_W_Hector_and_fitted(scenario, activityname, Hector_W, fitted_W):
-	mplot.clf()  # Clear the current figure
-	mplot.plot(range(getPulseDataLength()), Hector_W, label='Hector W for ' + activityname)
-	mplot.plot(range(getPulseDataLength()), fitted_W, label='Fitted W for ' + activityname)
-	mplot.xlabel('Years')
-	mplot.ylabel('Wpt value')
-	mplot.title('Comparison of Hector and fitted W for ' + activityname)
-	mplot.legend()
-	mplot.savefig(getOutputDirectory() + activityname + " " + experimentTag_to_file_name(scenario) + "_plot_W_Hector_and_fitted.jpg")
-	# mplot.savefig(getOutputDirectory() + "Wpt_comparison_Carbon.svg")
-	# mplot.show()
-
-# Examining SMDAMAGE_Fit_W temperature and Hector temperature.
-def plot_temps_Hector_and_fitted(scenario, Hector_temp, fit_temp, years):
-	mplot.clf()  # Clear the current figure
-	mplot.plot(years, Hector_temp, label='Hector temperature')
-	mplot.plot(years, fit_temp, label='Implied SMDAMAGE temperature')
-	mplot.xlabel('Years')
-	mplot.ylabel('Temperature')
-	mplot.title('Comparison of Hector and implied SMDAMAGE temperature')
-	mplot.legend()
-	mplot.savefig(getOutputDirectory() + experimentTag_to_file_name(scenario) + "_plot_temps_Hector_and_fitted.jpg")
-	# mplot.savefig(getOutputDirectory() + "Temp_comparison_fittedW.svg")
-	# mplot.show()
-
-def append_output_to_csv(scenario, calling_function_name, temperature_data):
-	output_file = getOutputDirectory() + "temperature_output.csv" # doesn't have to be temperature data!
-	years = sorted(temperature_data.keys())
-	# assert(min(years) == getStartYear()) # so they have the same columns.
-	with open(output_file, 'a', newline='', encoding='utf-8') as csv_file:
-		writer = csv.writer(csv_file)
-		if os.stat(output_file).st_size == 0: writer.writerow(['ExperimentTag', 'FunctionName'] + years)
-		writer.writerow([getExperimentTag(scenario), calling_function_name] + [temperature_data[year] for year in years])
-
-def write_fitted_Wpt_to_csv(): # Write the fitted Wpt values to a CSV file in rows of pollutant and columns of years. Useful for analysis in Excel.
-	with open(getOutputDirectory() + "SMDAMAGE_fitted_Wpt.pkl", "rb") as mypickle: Wpt_dict = pickle.load(mypickle)
-	pollutants = sorted(set(pollutant for pollutant, year in Wpt_dict.keys()))
-	years = sorted(set(year for pollutant, year in Wpt_dict.keys()))
-	with open(getOutputDirectory() + "SMDAMAGE_fitted_Wpt.csv", 'w', newline='', encoding='utf-8') as csv_file:
-		writer = csv.writer(csv_file)
-		writer.writerow(['Pollutant'] + years)
-		for pollutant in pollutants: writer.writerow([pollutant] + [Wpt_dict.get((pollutant, year), '') for year in years])
-
-def run_SMDAMAGE_fit_W(scenario):
-	# 	If scenario.is_removal_luc,
-	# 		apply Wpt_dict[('luc',t)] for ['Agriculture', 'Seaweed'] + getTreetypes().
-	# 		fit both 'Carbon' and 'luc'.
-	#	else
-	# 		fit only Carbon, and
-	# 		apply Wpt_dict[('Carbon',t)] for ['Agriculture', 'Seaweed'] + getTreetypes().
-	
-	Emitters = ['Carbon', 'C2F6', 'CF4', 'CH4', 'HFC125', 'HFC134a', 'HFC143a', 'N2O','SF6']
-	Removers = ['Agriculture', 'Seaweed', 'Loblolly_pine_150', 'Ponderosa_pine_150', 'Black_walnut_150', 'Loblolly_pine_10', 'Ponderosa_pine_10', 'Black_walnut_10', 'Loblolly_pine_24', 'Ponderosa_pine_103', 'Black_walnut_55']
-	Pulse = getPulse() # Reads the Pulse input file. Includes 'luc'.
-
-	# Load default Wpt_dict. ------------------------------------------------------------------------------------------
-	# Wpt0 = a unit emission of pollutant or planting p induces degrees Celsius/kg marginal warming Wpt0[p, t0], t0 years after emission or tree planting.
-	Wpt_dict = {(p, float(t0)): 0.0 for p in Emitters + Removers for t0 in range(getPulseDataLength())} # Time subscripts are floats because periods could be more often than years, e.g., 2025.0, 2025.5, ...
-	scaleCelsius = 1000.0 # Thousandths of a degree.
-
-	for p in ['C2F6', 'CF4', 'CH4', 'HFC125', 'HFC134a', 'HFC143a', 'N2O', 'SF6']:
-		for t0 in range(getPulseDataLength()): Wpt_dict[(p, float(t0))] = Pulse[p][1 + t0]*scaleCelsius/Pulse[p][0]
-
-	for t0 in range(getPulseDataLength()): # Divide by Pulse[p][0] for Hector greenhouse gasses to normalize the pulse size.
-		# Always calculate error from the original Wpt, not to previously fitted Wpt.
-		# Carbon. Degrees C in warmingperiod per million tons emitted in emissionperiod. Carbon pulse units are degrees C/gigaton (ffi: GtC/yr), hence divide Carbon pulse by 1000 to convert GtC to MtC.
-		Wpt_dict [('Carbon', float(t0))] = Pulse['ffi'][1 + t0]*scaleCelsius/Pulse['ffi'][0]/1000.0
-		Wpt_dict [('luc', float(t0))] = Pulse['luc'][1 + t0]*scaleCelsius/Pulse['luc'][0]/1000.0
-		
-		# Agriculture. Degrees C in warmingperiod per million tons emitted in emissionperiod. Divide by 1000 because carbon pulse units are degrees C/gigaton.
-		if scenario.is_removal_luc: Wpt_dict [('Agriculture', float(t0))] = - Pulse['luc'][1 + t0]*scaleCelsius/Pulse['luc'][0]/1000.0
-		else: Wpt_dict [('Agriculture', float(t0))] = - Wpt_dict [('Carbon', float(t0))]
-		
-		# Seaweed has same cooling effects as Agriculture, following either "luc" or "ffi" in Hector. Degrees C in warmingperiod per million tons emitted in emissionperiod. Divide by 1000 because Carbon pulse units are degrees C/gigaton.
-		Wpt_dict [('Seaweed', float(t0))] = Wpt_dict [('Agriculture', float(t0))]
-
-	Treetypes = getTreeTypes() #['Loblolly_pine_150', 'Ponderosa_pine_150', 'Black_walnut_150', 'Loblolly_pine_10', 'Ponderosa_pine_10', 'Black_walnut_10', 'Loblolly_pine_24', 'Ponderosa_pine_103', 'Black_walnut_55']
-	Treetype_carbon_removal = get_Treetype_carbon_removal(Treetypes)
-	# A hectare of tree planting convolves into future carbon removal, which convolves into future cooling.
-	# Forestry, cooling effects. Convolution of tree growth with carbon pulse. Degrees C in warmingperiod per million tons sequestered in emissionperiod. Divide by 1000 because Carbon pulse units are degrees C/gigaton.
-	for tree in Treetypes: # Tree is planted in year 0. Tree sequesters TonsSequesteredPerPeriod tonnes/hectare in each sequesterperiod from 0 to 155.
-		for treegrowthyear in range(0, 156): # Length of tree contract.
-			for coolingyear in range(treegrowthyear, getPulseDataLength()): # Growth in the last year of the contract has future cooling effects.
-				# Forestry has same cooling effects as Agriculture, following either "luc" or "ffi" in Hector, convolved with tree growth. 
-				Wpt_dict[(tree, float(coolingyear))] += Treetype_carbon_removal[tree][treegrowthyear]*Wpt_dict[('Agriculture', float(coolingyear - treegrowthyear))]*scaleCelsius/1000.0
-
-	# Load Vpt_dict. ------------------------------------------------------------------------------------------
-	# Data is the previous vpt solution from SMDAMAGE and the Hector temperature.
-	my_old_vpt = open_pkl("SMDAMAGE " + experimentTag_to_file_name(scenario)) # amount of activity p in year t from solution of model P1 or P2.
-	Vpt = {(p,t): my_old_vpt[p,t].varValue for (p,t) in my_old_vpt}
-	
-	# Construct PT_set. ------------------------------------------------------------------------------------------
-	Constant_PT_set = set() # Use constant W for activities you're not trying to fit.
-	for p in ['C2F6', 'CF4', 'CH4', 'HFC125', 'HFC134a', 'HFC143a', 'N2O', 'SF6']:
-		for t in getBidPeriods(): Constant_PT_set.add((p,t))
-	# if scenario.is_removal_luc:
-	# 	for t in getBidPeriods(): Constant_PT_set.add(('Carbon',t))
-	# else: luc is not part of the model.
-
-	Variable_PT_set = set() # But note that "luc" is not an activity in SMDAMAGE.
-	# if scenario.is_removal_luc: Variable_w_activities = ['luc'] + ['Agriculture', 'Seaweed'] + getTreeTypes()
-	if scenario.is_removal_luc: Variable_w_activities = ['Carbon'] + ['luc'] + ['Agriculture', 'Seaweed'] + getTreeTypes()
-	else: Variable_w_activities = ['Carbon'] + ['Agriculture', 'Seaweed'] + getTreeTypes()
-
-	for p in Variable_w_activities:
-		for t in getBidPeriods(): Variable_PT_set.add((p,t))
-		
-	# Decision variables ------------------------------------------------------------------------------------------
-	wpt = {}
-
-	for t in range(getPulseDataLength()): 
-		wpt[('Carbon',float(t))] = LpVariable("wpt(Carbon," + str(t) + ")", 0.0, None) # >= 0
-		if scenario.is_removal_luc: wpt[('luc',float(t))] = LpVariable("wpt(luc," + str(t) + ")", 0.0, None) # >= 0 # Watch the bounds! Emitter w >= 0, remover w <= 0.
-		# else: wpt[('Carbon',float(t))] = LpVariable("wpt(Carbon," + str(t) + ")", 0.0, None) # >= 0
-	
-		wpt[('Seaweed',float(t))] = LpVariable("wpt(Seaweed," + str(t) + ")", None, 0.0) # <= 0
-		wpt[('Agriculture',float(t))] = LpVariable("wpt(Agriculture," + str(t) + ")", None, 0.0) # <= 0
-		for tree in Treetypes: wpt[(tree,float(t))] = LpVariable("wpt(" + tree + "," + str(t) + ")", None, 0.0) # <= 0
-		
-	over_error_t = {t: LpVariable("over_error_t(" + str(t) + ")", 0.0, None) for t in getModelPeriods()} # error below HectorTempt in year t.
-	under_error_t = {t: LpVariable("under_error_t(" + str(t) + ")", 0.0, None) for t in getModelPeriods()} # error above HectorTempt in year t.
-	SMDAMAGE_temp_t = {t: LpVariable("SMDAMAGE_temp_t(" + str(t) + ")", None, None) for t in getModelPeriods()} # Implied SMDAMAGE temperature.
-	
-	W_over_error_t = {t: LpVariable("over_error_t(" + str(t) + ")", 0.0, None) for t in range(getPulseDataLength())} # error below HectorTempt in year t.
-	W_under_error_t = {t: LpVariable("under_error_t(" + str(t) + ")", 0.0, None) for t in range(getPulseDataLength())} # error above HectorTempt in year t.
-	initial_Temp = LpVariable("initial_Temp", None, None)
-	# initial_ghg_p = {p: LpVariable("initial_ghg_p(" + str(p) + ")", 0.0, None) for p in Emitters}
-	
-	# Objective: minimize total error --------------------
-	SMDAMAGE_fit_W = LpProblem("SMDAMAGE_fit_W", LpMinimize) # Temperature error is in 1000s, W error is in 0.001s, so we need to scale W error.
-	SMDAMAGE_fit_W += lpSum(over_error_t[t] + under_error_t[t] for t in getModelPeriods()), "Total error"
-	# SMDAMAGE_fit_W += lpSum(over_error_t[t] + under_error_t[t] for t in getModelPeriods()) + 100000.0*lpSum(W_over_error_t[t] + W_under_error_t[t] for t in range(getPulseDataLength())), "Total error"
-	
-	# Constraints: temperature error. --------------------
-	HectorTemp = get_Hector_temperature(scenario) # the temperature in year t from Hector simulating solution Vp,t.
-	
-	# Constraints: warming  --------------------
-	for t in getModelPeriods():
-		if t <= 2300.0: # HectorTemp goes only to 2300.
-			# Different experiments. 
-
-			# Warming constraints. Ag, seaweed, and trees use the "luc" warming factors, but "luc" itself is not activity. No Vpt['luc',u] exists.
-			SMDAMAGE_fit_W +=  initial_Temp \
-				+ lpSum ([wpt[(p, float(t - u))]*Vpt[p,u] for (p,u) in Variable_PT_set if u <= t and p != "luc"])\
-				+ sum([Wpt_dict[(p, float(t - u))]*Vpt[p,u] for (p,u) in Constant_PT_set if u <= t])\
-				== SMDAMAGE_temp_t[t], "SMDAMAGE_Temp(" + str(t) + ")"
-			
-			SMDAMAGE_fit_W += SMDAMAGE_temp_t[t] - over_error_t[t] + under_error_t[t] == HectorTemp[t], "Temp_t(" + str(t) + ")"
-			
-	# Constraints: calculate W error.  --------------------
-	# for u in range(getPulseDataLength()): # Both ffi and luc pulses peak before 20 years after emission.
-	# 	if scenario.is_removal_luc: SMDAMAGE_fit_W += wpt[('luc', float(u))] - W_over_error_t[u] + W_under_error_t[u] == Wpt_dict[('luc', float(u))], "W_fit(" + str(u) + ")"
-	# 	else: SMDAMAGE_fit_W += wpt[('Carbon', float(u))] - W_over_error_t[u] + W_under_error_t[u] == Wpt_dict[('Carbon', float(u))], "W_fit(" + str(u) + ")"
-
-	# Constraints: consistency between activity types.  --------------------
-	for u in range(getPulseDataLength()): 
-		if scenario.is_removal_luc: SMDAMAGE_fit_W += wpt[('Agriculture', float(u))] == - wpt[('luc', float(u))], "W_agriculture(" + str(u) + ")"
-		else:               SMDAMAGE_fit_W += wpt[('Agriculture', float(u))] == - wpt[('Carbon', float(u))], "W_agriculture(" + str(u) + ")"
-		SMDAMAGE_fit_W += wpt[('Seaweed', float(u))] == wpt[('Agriculture', float(u))], "W_seaweed(" + str(u) + ")"
-	
-	# Constraints: convolution for trees.  
-	for tree in Treetypes: # If tree is planted in year 0, it sequesters TonsSequesteredPerPeriod tonnes/hectare in each sequesterperiod from 0 to 155.
-		# Example: wpt[5] = growth[0]*wpt[5] + growth[1]*wpt[4] + growth[2]*wpt[3] + growth[3]*wpt[2] + growth[4]*wpt[1] + growth[5]*wpt[0]
-		for coolingyear in range(0, getPulseDataLength()): # Growth in the last year of the contract has future cooling effects.
-			SMDAMAGE_fit_W += wpt[(tree, float(coolingyear))] \
-				== lpSum(Treetype_carbon_removal[tree][treegrowthyear] * wpt[('Agriculture', float(coolingyear - treegrowthyear))] * scaleCelsius / 1000.0 \
-					for treegrowthyear in range(0, min(156, coolingyear + 1))), "W_tree(" + tree + "," + str(coolingyear) + ")" # 156 year contract.
-
-	# Constraints: physics pulse consistency.  --------------------
-	# SMDAMAGE_fit_W += wpt[('Carbon', 0.0)] == 0.0, "W_consistency(0.0)"
-	# for u in range(1, 15): # Both ffi and luc pulses peak before 20 years after emission.
-	# 	SMDAMAGE_fit_W += wpt[('Carbon', float(u))] <= wpt[('Carbon', float(u + 1))], "W_consistency(" + str(u) + ")"
-	for u in range(20, getPulseDataLength() - 1): # Both ffi and luc pulses peak before 20 years after emission.
-		if scenario.is_removal_luc: SMDAMAGE_fit_W += wpt[('luc', float(u))] >= wpt[('luc', float(u + 1))], "W_luc_consistency(" + str(u) + ")"
-		# else: SMDAMAGE_fit_W += wpt[('Carbon', float(u))] >= wpt[('Carbon', float(u + 1))], "W_consistency(" + str(u) + ")"
-		SMDAMAGE_fit_W += wpt[('Carbon', float(u))] >= wpt[('Carbon', float(u + 1))], "W_carbon_consistency(" + str(u) + ")"
-	
-	# Write a debug model. Easy to open with Notepad or LP_SolveIDE.
-	# SMDAMAGE_fit_W.writeLP(getOutputDirectory() + "Calibrate W " + getExperimentTag() + ".lpt")
-	
-	solve_status = LpStatus[SMDAMAGE_fit_W.solve(PULP_CBC_CMD(msg=0))]
-	print (f"SMDAMAGE_Fit_W done. Solve status: {solve_status}, total error = {value(SMDAMAGE_fit_W.objective)}. Initial temperature = {value(initial_Temp.varValue)}")
-	
-	plot_W_Hector_and_fitted(scenario, "Carbon", [Wpt_dict[('Carbon', float(t))] for t in range(getPulseDataLength())], [wpt[('Carbon', float(t))].varValue for t in range(getPulseDataLength())])
-	if scenario.is_removal_luc: plot_W_Hector_and_fitted(scenario, "luc", [Wpt_dict[('luc', float(t))] for t in range(getPulseDataLength())], [wpt[('luc', float(t))].varValue for t in range(getPulseDataLength())])
-	# else: plot_W_Hector_and_fitted(scenario, "Carbon", [Wpt_dict[('Carbon', float(t))] for t in range(getPulseDataLength())], [wpt[('Carbon', float(t))].varValue for t in range(getPulseDataLength())], getPulseDataLength())
-	plot_temps_Hector_and_fitted(scenario, [HectorTemp[t] for t in getModelPeriods() if t <= 2300], [SMDAMAGE_temp_t[t].varValue for t in getModelPeriods() if t <= 2300], [t for t in getModelPeriods() if t <= 2300])
-
-	for p in Variable_w_activities:
-		for t in range(getPulseDataLength()): Wpt_dict[(p,float(t))] = wpt[(p, float(t))].varValue 
-	# yourdictionary_to_CSV(Wpt_dict, "Wpt_dict " + experimentTag_to_file_name(scenario))
-	with open(getOutputDirectory() + "SMDAMAGE_fitted_Wpt.pkl", "wb") as mypickle: pickle.dump(Wpt_dict, mypickle)
-	return initial_Temp.varValue
-# End run_SMDAMAGE_fit_W().
 # ========================================================================================
 # Part VI. Main. Run SMDAMAGE, convert SMDAMAGE output to Hector input, run Hector, and compare temperatures.
 # ========================================================================================
+
+def append_output_to_csv(scenario, calling_function_name, temperature_data):
+	output_filename = getOutputDirectory() + "temperature_output.csv"
+	with open(output_filename, mode='a', newline='', encoding='utf-8') as csv_file: # Append to CSV file.
+		writer = csv.writer(csv_file)
+		write_header = not os.path.exists(output_filename) or os.path.getsize(output_filename) == 0
+		if write_header: writer.writerow(['Source', 'Experiment'] + [str(t) for t in getModelPeriods()])
+		writer.writerow([calling_function_name, getExperimentTag(scenario)] + [temperature_data.get(t, '') for t in getModelPeriods()])
 # Preliminary: get pulses from Hector.
-# get_Pulses_from_Hector() # Output is Pulses_by_chemical.txt in the Hector directory. Move that to your /data/ directory.
+# hector_interface.get_Pulses_from_Hector() # Output is Pulses_by_chemical.txt in the Hector directory. Move that to your /data/ directory.
 
 # VI.A. Figure 1. SMDAMAGE uncalibrated. Uses the same tau for every year.
-# figure1 = Scenario(comment = "Fig1", discount_rate = 0.03, initial_temperature = 1400.0, tau = 2.5, is_revenue_neutral = True, is_removal_luc = False, use_updated_Wpt = False)
-# run_SMDAMAGE(figure1)
+figure1 = Scenario(comment = "Fig1", discount_rate = 0.03, initial_temperature = 1400.0, tau = 2.5, is_revenue_neutral = True, is_removal_luc = False, use_updated_Wpt = False)
+run_SMDAMAGE(figure1)
 # run_Hector_with_SMDAMAGE_solution(figure1) # 3. Run Hector on SMDAMAGE output.
-# plot_temps_SMDAMAGE_and_Hector(figure1, *get_SMDAMAGE_temps_actual_and_taxed(figure1), get_Hector_temperature(figure1)) 
-# calibrated_initial_temperature = run_SMDAMAGE_fit_W(figure1) # Should return 971.24975.
+# plotting_utils.plot_temps_SMDAMAGE_and_Hector(figure1, *get_SMDAMAGE_temps_actual_and_taxed(figure1), get_Hector_temperature(figure1), getOutputDirectory, experimentTag_to_file_name) 
+# calibrated_initial_temperature = wpt_calibration.run_SMDAMAGE_fit_W(figure1) # Should return 971.24975.
 
 # # VI.B. Figure 1. SMDAMAGE calibrated. discount_rate 0.03, initial_temperature 971.24975, tau 2.5, is_revenue_neutral True, is_removal_luc False, use_updated_Wpt False.
 # figure1.initial_temperature = calibrated_initial_temperature
 # figure1.use_updated_Wpt = True
 # run_SMDAMAGE(figure1) #  Uses the same tau for every year.
 # run_Hector_with_SMDAMAGE_solution(figure1) # What does the Hector trajectory look like with the calibrated SMDAMAGE solution?
-# plot_temps_SMDAMAGE_and_Hector(figure1, *get_SMDAMAGE_temps_actual_and_taxed(figure1), get_Hector_temperature(figure1)) 
+# plotting_utils.plot_temps_SMDAMAGE_and_Hector(figure1, *get_SMDAMAGE_temps_actual_and_taxed(figure1), get_Hector_temperature(figure1), getOutputDirectory, experimentTag_to_file_name) 
 
 # # # VI.C. Figure 2, robustness to discount rate: initial_temperature initial_temperature = 971.24975, is_revenue_neutral False, tau is irrelevant, is_removal_luc to False, use_updated_Wpt = True.
 # calibrated_initial_temperature = 971.24975
@@ -1440,21 +1114,21 @@ def run_SMDAMAGE_fit_W(scenario):
 
 # VII.A. Uncalibrated SMDAMAGE.
 # For the case of strong contracts, use discount_rate to 0.03, initial_temperature 971.24975, is_revenue_neutral True, tau is 2.4 (you can vary tau in repeat runs of SMDAMAGE to confirm), is_removal_luc to True, use_updated_Wpt = False.
-contracts_scenario = Scenario(comment = "Contracts", discount_rate = 0.03, initial_temperature = 971.24975, is_revenue_neutral = True, tau = 2.1, is_removal_luc = True, use_updated_Wpt = False)
-SMDAMAGE_final_temp = run_SMDAMAGE(contracts_scenario)
-run_Hector_with_SMDAMAGE_solution(contracts_scenario)
-# # plot_temps_SMDAMAGE_and_Hector(contracts_scenario, *get_SMDAMAGE_temps_actual_and_taxed(contracts_scenario), get_Hector_temperature(contracts_scenario))
+# contracts_scenario = Scenario(comment = "Contracts", discount_rate = 0.03, initial_temperature = 971.24975, is_revenue_neutral = True, tau = 2.1, is_removal_luc = True, use_updated_Wpt = False)
+# SMDAMAGE_final_temp = run_SMDAMAGE(contracts_scenario)
+# run_Hector_with_SMDAMAGE_solution(contracts_scenario)
+# # plotting_utils.plot_temps_SMDAMAGE_and_Hector(contracts_scenario, *get_SMDAMAGE_temps_actual_and_taxed(contracts_scenario), get_Hector_temperature(contracts_scenario), getOutputDirectory, experimentTag_to_file_name)
 
 # # # VII.B. Calibrate W.
-calibrated_initial_temperature = run_SMDAMAGE_fit_W(contracts_scenario)
+# calibrated_initial_temperature = wpt_calibration.run_SMDAMAGE_fit_W(contracts_scenario)
 
 # # # VII.C. Calibrated SMDAMAGE.
-contracts_scenario.use_updated_Wpt = True
-contracts_scenario.initial_temperature = calibrated_initial_temperature # 1255.5764
-SMDAMAGE_final_temp = run_SMDAMAGE(contracts_scenario)
+# contracts_scenario.use_updated_Wpt = True
+# contracts_scenario.initial_temperature = calibrated_initial_temperature # 1255.5764
+# SMDAMAGE_final_temp = run_SMDAMAGE(contracts_scenario)
 
 # run_Hector_with_SMDAMAGE_solution(contracts_scenario)
-# plot_temps_SMDAMAGE_and_Hector(contracts_scenario, *get_SMDAMAGE_temps_actual_and_taxed(contracts_scenario), get_Hector_temperature(contracts_scenario))
+# plotting_utils.plot_temps_SMDAMAGE_and_Hector(contracts_scenario, *get_SMDAMAGE_temps_actual_and_taxed(contracts_scenario), get_Hector_temperature(contracts_scenario), getOutputDirectory, experimentTag_to_file_name)
 
 # VIII. Short auctions, 2 years at a time.
 # VIII.A. Calibrate with a long-term model.
@@ -1462,7 +1136,7 @@ SMDAMAGE_final_temp = run_SMDAMAGE(contracts_scenario)
 # run_SMDAMAGE(Short_auctions_scenario) # A long auction for calibrating the short auctions.
 # run_Hector_with_SMDAMAGE_solution(Short_auctions_scenario) # 3. Run Hector on SMDAMAGE output.
 
-# calibrated_initial_temperature = run_SMDAMAGE_fit_W(Short_auctions_scenario) # Should return 895.95254.
+# calibrated_initial_temperature = wpt_calibration.run_SMDAMAGE_fit_W(Short_auctions_scenario) # Should return 895.95254.
 
 # VIII.B. Run the short auctions.
 # Short_auctions_scenario.initial_temperature = 895.95254 # calibrated_initial_temperature
@@ -1473,6 +1147,8 @@ SMDAMAGE_final_temp = run_SMDAMAGE(contracts_scenario)
 # tau_search = Scenario(comment = "Tau search", discount_rate = 0.03, initial_temperature = 971.24975, tau = 1.7, is_revenue_neutral = True, is_removal_luc = False, use_updated_Wpt = True)
 # run_SMDAMAGE_for_tau (tau_search) # Repeated solution of SMDAMAGE with subgradient optimization on tau.
 
-# write_fitted_Wpt_to_csv() # if you want to analyze the Wpt values in Excel.
+# wpt_calibration.write_fitted_Wpt_to_csv() # if you want to analyze the Wpt values in Excel.
 import winsound
 winsound.Beep(700, 500)  # Frequency: 1000 Hz, Duration: 500 ms
+
+
