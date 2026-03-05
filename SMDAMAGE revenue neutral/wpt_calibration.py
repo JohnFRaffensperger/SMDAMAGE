@@ -1,9 +1,7 @@
-# ========================================================================================
 # Part V. Wpt calibration functions for SMDAMAGE 
 # If the SMDAMAGE activity schedule did not match the temperature trajectory in Hector, 
 # we can adjust the Wpt values in SMDAMAGE.
 # John F Raffensperger. 2022-07-27, 2022-09-10, 2025-01-05.
-# ======================================================================================== 
 
 import csv
 import pickle

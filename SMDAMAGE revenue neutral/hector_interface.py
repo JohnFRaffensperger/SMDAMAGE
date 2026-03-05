@@ -1,12 +1,7 @@
-# =============================================================================================
 # Part II. Getting pulse information from Hector. John F. Raffensperger, 2019. 
 # =============================================================================================
 # This code changes the input to Hector, runs Hector, and reads the output,
 # with a pulse increase in each chemical, one chemical at a time, and then records the change in temperature.
-
-import os
-import subprocess
-from math import log10, floor
 
 # Before you run this code:
 # 	(1) run Hector with \input\hector_rcp26.ini and \input\emissions\rcp26_emissions.ini. You should get \output\outputstream_rcp26.csv. This output file has the base temperature by year.
@@ -23,6 +18,10 @@ from math import log10, floor
 #		Pulse year should not matter in theory, as long as the pulse provides a good signal. However, Hector's output ends in the year 2300, so pulsing in 2200 gives only 100 periods of output.
 # 	(2) run a batch file calling "hector input/hector_rcp26_pulsed.ini > hector_spew_all_chemicals.txt", to get Hector output RCP26_emissions_pulsed.csv;
 #	(3) read RCP26_emissions_pulsed.csv for the temperature by year, subtract those temperatures from the temperatures in outputstream_rcp26.csv
+
+import os
+import subprocess
+from math import log10, floor
 
 # This reads the existing emission in inputfile (e.g., RCP26_emissions.csv) and increases it in outputfilename (e.g., RCP26_emissions_pulsed.csv).
 # The outputfilename is the new input for Hector.

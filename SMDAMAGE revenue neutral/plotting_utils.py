@@ -1,8 +1,4 @@
-# ========================================================================================
-# Plotting utilities for SMDAMAGE climate economics simulation
-# Consolidated plotting functions for temperature comparisons and warming potential analysis
-# John F Raffensperger. 2025-03-04.
-# ======================================================================================== 
+# Plotting utilities for SMDAMAGE. John F. Raffensperger. 2025-03-04.
 
 import matplotlib.pyplot as mplot
 
