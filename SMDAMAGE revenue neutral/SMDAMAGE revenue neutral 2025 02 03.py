@@ -922,7 +922,7 @@ def run_SMDAMAGE_short_auctions(scenario): # Solve a sequence of SMDAMAGE models
 # Reads the Hector input file RCP_emissions, returns a dictionary RCP_emissions [year, emissionsType] = emissionsValue.
 # Called from convert_SMDAMAGE_solution_to_Hector_input().
 def getHectorEmissionsDictionary(RCP26_emissions_file): # e.g., "RCP26_emissions.csv"
-	with open ("../hector-2.0.1-Windows/input/emissions/" + RCP26_emissions_file) as Hector_input_file:
+	with open ("../../hector-2.0.1-Windows/input/emissions/" + RCP26_emissions_file) as Hector_input_file:
 		lines = [line.split(',') for line in Hector_input_file]
 	RCP26_emissions = {}
 	header = lines[3]
@@ -1000,7 +1000,7 @@ def write_SMDAMAGE_solution_to_Hector_input (scenario, SMDAMAGE_to_Hector_dict):
 	pollutantSet = pollutantSet.union([key[1] for key in SMDAMAGE_to_Hector_dict.keys()])
 	
 	# Write the SMDAMAGE solution dictionary to Hector input csv.
-	with open (f"../hector-2.0.1-Windows/input/emissions/" + experimentTag_to_file_name(scenario) + ".csv", 'w') as outputfile:
+	with open (f"../../hector-2.0.1-Windows/input/emissions/" + experimentTag_to_file_name(scenario) + ".csv", 'w') as outputfile:
 		header = "Year," + ','.join(pollutantSet)
 		outputfile.write(header + "\n")
 		for year in years:
@@ -1012,8 +1012,8 @@ def write_SMDAMAGE_solution_to_Hector_input (scenario, SMDAMAGE_to_Hector_dict):
 def run_Hector_with_SMDAMAGE_solution(scenario): # Goal is to get the Hector temperature trajectory.
 	write_SMDAMAGE_solution_to_Hector_input(scenario, convert_SMDAMAGE_solution_to_Hector_input(scenario)) # 2. Convert SMDAMAGE output to Hector input.
 	original_directory = os.getcwd()
-	# hector_directory = "C:/Users/johnr/Documents/Work documents/2 Research/Global warming/Numerical Simulation/hector-2.0.1-Windows/"
-	hector_directory = "D:/Work documents/2 Research/Global warming/Numerical Simulation/hector-2.0.1-Windows/"
+	hector_directory = "C:/Users/johnr/Documents/Work documents/2 Research/Global warming/Numerical Simulation/hector-2.0.1-Windows/"
+	# hector_directory = "D:/Work documents/2 Research/Global warming/Numerical Simulation/hector-2.0.1-Windows/"
 	os.chdir(hector_directory)
 
 	# Create Hector ini file.
@@ -1049,7 +1049,7 @@ def get_SMDAMAGE_temps_actual_and_taxed(scenario):
 	return taxed_temps, SMDAMAGE_temperature
 
 def get_Hector_temperature(scenario):
-	hector_output_file_name = "../hector-2.0.1-Windows/output/outputstream_" + experimentTag_to_file_name(scenario) + ".csv"
+	hector_output_file_name = "../../hector-2.0.1-Windows/output/outputstream_" + experimentTag_to_file_name(scenario) + ".csv"
 	with open (hector_output_file_name) as hector_output_file: lines = [line.split(',') for line in hector_output_file]
 
 	temperature = {}
@@ -1073,22 +1073,24 @@ def append_output_to_csv(scenario, calling_function_name, temperature_data):
 		write_header = not os.path.exists(output_filename) or os.path.getsize(output_filename) == 0
 		if write_header: writer.writerow(['Source', 'Experiment'] + [str(t) for t in getModelPeriods()])
 		writer.writerow([calling_function_name, getExperimentTag(scenario)] + [temperature_data.get(t, '') for t in getModelPeriods()])
-# Preliminary: get pulses from Hector.
-# hector_interface.get_Pulses_from_Hector() # Output is Pulses_by_chemical.txt in the Hector directory. Move that to your /data/ directory.
 
-# VI.A. Figure 1. SMDAMAGE uncalibrated. Uses the same tau for every year.
-figure1 = Scenario(comment = "Fig1", discount_rate = 0.03, initial_temperature = 1400.0, tau = 2.5, is_revenue_neutral = True, is_removal_luc = False, use_updated_Wpt = False)
-run_SMDAMAGE(figure1)
-# run_Hector_with_SMDAMAGE_solution(figure1) # 3. Run Hector on SMDAMAGE output.
-# plotting_utils.plot_temps_SMDAMAGE_and_Hector(figure1, *get_SMDAMAGE_temps_actual_and_taxed(figure1), get_Hector_temperature(figure1), getOutputDirectory, experimentTag_to_file_name) 
-# calibrated_initial_temperature = wpt_calibration.run_SMDAMAGE_fit_W(figure1) # Should return 971.24975.
+if __name__ == "__main__":
+	# Preliminary: get pulses from Hector.
+	# hector_interface.get_Pulses_from_Hector() # Output is Pulses_by_chemical.txt in the Hector directory. Move that to your /data/ directory.
 
-# # VI.B. Figure 1. SMDAMAGE calibrated. discount_rate 0.03, initial_temperature 971.24975, tau 2.5, is_revenue_neutral True, is_removal_luc False, use_updated_Wpt False.
-# figure1.initial_temperature = calibrated_initial_temperature
-# figure1.use_updated_Wpt = True
-# run_SMDAMAGE(figure1) #  Uses the same tau for every year.
-# run_Hector_with_SMDAMAGE_solution(figure1) # What does the Hector trajectory look like with the calibrated SMDAMAGE solution?
-# plotting_utils.plot_temps_SMDAMAGE_and_Hector(figure1, *get_SMDAMAGE_temps_actual_and_taxed(figure1), get_Hector_temperature(figure1), getOutputDirectory, experimentTag_to_file_name) 
+	# VI.A. Figure 1. SMDAMAGE uncalibrated. Uses the same tau for every year.
+	# figure1 = Scenario(comment = "Fig1", discount_rate = 0.03, initial_temperature = 1400.0, tau = 2.5, is_revenue_neutral = True, is_removal_luc = False, use_updated_Wpt = False)
+	# run_SMDAMAGE(figure1)
+	# run_Hector_with_SMDAMAGE_solution(figure1) # 3. Run Hector on SMDAMAGE output.
+	# plotting_utils.plot_temps_SMDAMAGE_and_Hector(figure1, *get_SMDAMAGE_temps_actual_and_taxed(figure1), get_Hector_temperature(figure1), getOutputDirectory, experimentTag_to_file_name) 
+	# calibrated_initial_temperature = wpt_calibration.run_SMDAMAGE_fit_W(figure1) # Should return 971.24975.
+
+	# # VI.B. Figure 1. SMDAMAGE calibrated. discount_rate 0.03, initial_temperature 971.24975, tau 2.5, is_revenue_neutral True, is_removal_luc False, use_updated_Wpt False.
+	figure1.initial_temperature = calibrated_initial_temperature
+	figure1.use_updated_Wpt = True
+	run_SMDAMAGE(figure1) #  Uses the same tau for every year.
+	run_Hector_with_SMDAMAGE_solution(figure1) # What does the Hector trajectory look like with the calibrated SMDAMAGE solution?
+	plotting_utils.plot_temps_SMDAMAGE_and_Hector(figure1, *get_SMDAMAGE_temps_actual_and_taxed(figure1), get_Hector_temperature(figure1), getOutputDirectory, experimentTag_to_file_name) 
 
 # # # VI.C. Figure 2, robustness to discount rate: initial_temperature initial_temperature = 971.24975, is_revenue_neutral False, tau is irrelevant, is_removal_luc to False, use_updated_Wpt = True.
 # calibrated_initial_temperature = 971.24975
@@ -1145,10 +1147,8 @@ run_SMDAMAGE(figure1)
 
 # Search for tau. Starts with tau = 1.7 for every constrained year, then uses subgradient optimization to choose a tau for each year.
 # tau_search = Scenario(comment = "Tau search", discount_rate = 0.03, initial_temperature = 971.24975, tau = 1.7, is_revenue_neutral = True, is_removal_luc = False, use_updated_Wpt = True)
-# run_SMDAMAGE_for_tau (tau_search) # Repeated solution of SMDAMAGE with subgradient optimization on tau.
+	# run_SMDAMAGE_for_tau (tau_search) # Repeated solution of SMDAMAGE with subgradient optimization on tau.
 
-# wpt_calibration.write_fitted_Wpt_to_csv() # if you want to analyze the Wpt values in Excel.
-import winsound
-winsound.Beep(700, 500)  # Frequency: 1000 Hz, Duration: 500 ms
-
-
+	# wpt_calibration.write_fitted_Wpt_to_csv() # if you want to analyze the Wpt values in Excel.
+	import winsound
+	winsound.Beep(700, 500)  # Frequency: 1000 Hz, Duration: 500 ms
