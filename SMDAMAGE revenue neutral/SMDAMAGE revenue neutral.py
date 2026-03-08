@@ -18,13 +18,13 @@
 # ../data/Agriculture_bids.csv,
 # ../data/Seaweed_bids.csv.
 
-import csv # input and output.
+# import csv # input and output.
 import matplotlib.pyplot as mplot # graphing.
 import os # file management.
 import pickle # saving and retrieving solutions, especially the calibrated Wpt.
 from pulp import * #pulp.pulpTestAll() # to solve the linear programs.
 import time # for timing the run.
-import subprocess # for calling external processes
+# import subprocess # for calling external processes
 import hector_interface # Hector pulse generation functions.
 import wpt_calibration # Wpt calibration functions
 import plotting_utils # Consolidated plotting functions
@@ -238,17 +238,15 @@ def read_bids(scenario):
 	return Bapt, Uapt, APT_set, PT_set
 
 def run_SMDAMAGE(scenario): # Main function. Solve the SMDAMAGE model to find the best schedule of emissions and carbon removal.
-	# All objective function coefficients should be millions of dollars. So a bid of 1 is a bid for $1 million per unit of the chemical.
-	# Caution, Carbon is 'ffi' in pulsefile.
 	print ("\nSMDAMAGE. " + defaults_and_utilities.getExperimentTag(scenario) + ". " + time.asctime(time.localtime(time.time())) + ".")
 
 	Wpt_dict = get_warming_effects(scenario) # Get warming effects in degrees Celsius in each period, based on the solution vpt.
 
-	# 2. Bids. ------------------------------------------------------------------------------------------
+	# Bids. ------------------------------------------------------------------------------------------
+	# All objective function coefficients should be millions of dollars. So a bid of 1 is a bid for $1 million per unit of the chemical.
 	print ("2. Reading bids...")
 	Bapt, Uapt, APT_set, PT_set = read_bids(scenario)
 
-	# 3. Set up model. ------------------------------------------------------------------------------------------
 	Pollutants = sorted(list(set([p for p,t in PT_set])))
 	BidStepSet = {}
 	for (p,t) in PT_set: BidStepSet[p,t] = []
@@ -261,6 +259,7 @@ def run_SMDAMAGE(scenario): # Main function. Solve the SMDAMAGE model to find th
 	qapt = {(a,p,t): LpVariable("qapt(" + str(a) + "," + p + "," + str(t) + ")", 0.0, Uapt[a,p,t]) for (a, p, t) in APT_set}
 	vpt = {(p,t): LpVariable("vpt(" + p + "," + str(t) + ")", None, None) for (p, t) in PT_set} # Must be a free variable.
 
+	# Reminder, Carbon is 'ffi' in pulsefile.
 	# Emitters face tax tau. Others do not.
 	Emitters = defaults_and_utilities.getEmitters() # ['C2F6', 'CF4', 'CH4', 'Carbon', 'HFC125', 'HFC134a', 'HFC143a', 'N2O', 'SF6']
 	
@@ -357,66 +356,16 @@ def run_SMDAMAGE(scenario): # Main function. Solve the SMDAMAGE model to find th
 		
 	# print ("Done, %s, %.1f seconds." % (time.asctime(time.localtime(time.time())), float(time.time() - startTime)))
 	# print ("Reminder: convert $/ton C to $/ton CO2. Temp in 2125 is " + str(round(scenario.initial_temperature + temperatureChange [2125].varValue,3)) + " thousandths of a degree C.")
+	# print(getCarbonRemovedByForestry("Forestry carbon" + defaults_and_utilities.experimentTag_to_file_name(scenario)))
 
 	return scenario.initial_temperature + temperatureChange [2125].varValue
 
-	# print(getCarbonRemovedByForestry("Forestry carbon" + defaults_and_utilities.experimentTag_to_file_name(scenario)))
 # END run_SMDAMAGE().
 
 def run_SMDAMAGE_for_tau(scenario): # This version finds the optimal tau.
-	# All objective function coefficients should be millions of dollars. So a bid of 1 is a bid for $1 million per unit of the chemical.
-	# Caution, Carbon is 'ffi' in pulsefile.
-	
-	# Agriculture and "Carbon" are in megatons of carbon (not CO2). Hector uses gigatons of carbon, so we need to convert Hector's gigatons warming effects to SMDAMAGE megatons decision variables and back again to Hector gigatons for validation.
-	Units = defaults_and_utilities.getUnits() # {'Agriculture':'mtC', 'Black_walnut_150':'mhectares', 'Black_walnut_10':'mhectares', 'Black_walnut_55':'mhectares', 'C2F6':'kt', 'CF4':'kt', 'CH4':'mt', 'Carbon':'mtC', 'HFC125':'kt', 'HFC134a':'kt', 'HFC143a':'kt', 'Loblolly_pine_150':'mhectares', 'Loblolly_pine_10':'mhectares', 'Loblolly_pine_24':'mhectares', 'N2O':'mt', 'Ponderosa_pine_150':'mhectares', 'Ponderosa_pine_10':'mhectares', 'Ponderosa_pine_103':'mhectares', 'Seaweed':'mt', 'SF6':'kt'}
-	# Treetypes = defaults_and_utilities.getTreeTypes() #['Loblolly_pine_150', 'Ponderosa_pine_150', 'Black_walnut_150', 'Loblolly_pine_10', 'Ponderosa_pine_10', 'Black_walnut_10', 'Loblolly_pine_24', 'Ponderosa_pine_103', 'Black_walnut_55']
-	
-	# # 1. Warming effects.
-	# print ("\nSMDAMAGE. " + defaults_and_utilities.getExperimentTag(scenario) + ". " + time.asctime(time.localtime(time.time())) + ".")
-	# Pulse = hector_interface.getPulse() # Reads the Pulse input file.
-
-	# # Wpt0 = a unit emission of pollutant or planting p induces degrees Celsius/kg marginal warming Wpt0[p, t0], t0 years after emission or tree planting.
-	# # Time subscripts are floats because periods could be more often than years, e.g., 2025.0, 2025.5, ...
-	# Wpt_dict = {(p, float(t0)): 0.0 for p in Emitters + Removers for t0 in range(defaults_and_utilities.getPulseDataLength())} # >= 0.
-	# scaleCelsius = 1000.0 # Thousandths of a degree.
-
-	# if scenario.use_updated_Wpt: Wpt_pkl = defaults_and_utilities.open_pkl("SMDAMAGE_fitted_Wpt") # Retrieve the updated Wpt values from SMDAMAGE_fit_W.
-	# for t0 in range(defaults_and_utilities.getPulseDataLength()): # Divide by Pulse[p][0] for Hector greenhouse gasses to normalize the pulse size.
-	# 	# Carbon. Degrees C in warmingperiod per million tons emitted in emissionperiod. Carbon pulse units are degrees C/gigaton (ffi: GtC/yr), hence divide Carbon pulse by 1000 to convert GtC to MtC.
-	# 	if scenario.use_updated_Wpt: # If not variable in SMDAMAGE_Fit_W, then it will be the same as in the original pulse file.
-	# 		Wpt_dict [('luc', float(t0))] = Wpt_pkl[('luc', float(t0))] 
-	# 		Wpt_dict [('Carbon', float(t0))] = Wpt_pkl[('Carbon', float(t0))]
-	# 	else:
-	# 		Wpt_dict [('luc', float(t0))] = Pulse['luc'][1 + t0]*scaleCelsius/Pulse['ffi'][0]/1000.0
-	# 		Wpt_dict [('Carbon', float(t0))] = Pulse['ffi'][1 + t0]*scaleCelsius/Pulse['ffi'][0]/1000.0
-		
-	# 	if scenario.is_removal_luc: Wpt_dict [('Agriculture', float(t0))] = - Wpt_dict [('luc', float(t0))]
-	# 	else: Wpt_dict [('Agriculture', float(t0))] = - Wpt_dict [('Carbon', float(t0))]
-		
-	# 	# Seaweed has same cooling effects as Agriculture, following either "luc" or "ffi" in Hector. Degrees C in warmingperiod per million tons emitted in emissionperiod. Divide by 1000 because Carbon pulse units are degrees C/gigaton.
-	# 	Wpt_dict [('Seaweed', float(t0))] = Wpt_dict [('Agriculture', float(t0))]
-		
-	# # A hector of tree planting convolves into future carbon removal.
-	# Treetype_carbon_removal = defaults_and_utilities.get_Treetype_carbon_removal(Treetypes)
-	# # A hector of tree planting convolves into future carbon removal, which convolves into future cooling.
-	# # Forestry, cooling effects. Convolution of tree growth with carbon pulse. Degrees C in warmingperiod per million tons sequestered in emissionperiod. Divide by 1000 because Carbon pulse units are degrees C/gigaton.
-	# for tree in Treetypes: # Tree is planted in year 0. Tree sequesters TonsSequesteredPerPeriod tonnes/hectare in each sequesterperiod from 0 to 155.
-	# 	for treegrowthyear in range(0, 156): # Length of tree contract.
-	# 		for coolingyear in range(treegrowthyear, defaults_and_utilities.getPulseDataLength()): # Growth in the last year of the contract has future cooling effects.
-	# 			# Forestry has same cooling effects as Agriculture, following either "luc" or "ffi" in Hector, convolved with tree growth. 
-	# 			Wpt_dict[(tree, float(coolingyear))] += Treetype_carbon_removal[tree][treegrowthyear]*Wpt_dict[('Agriculture', float(coolingyear - treegrowthyear))]*scaleCelsius/1000.0
-
-	# # 	CH4: MtCH4/yr, N2O: MtN2O-N/yr, C: MtC/yr, NMVOC: Mt/yr, BC: Mt/yr, OC: Mt/yr,
-	# # 	CF4: kt/yr, C2F6: kt/yr, HFC125: kt/yr, HFC134a: kt/yr, HFC143a: kt/yr, CFC11: kt/yr, CFC12: kt/yr, HCF22: kt/yr]
-	# for p in ['C2F6', 'CF4', 'CH4', 'HFC125', 'HFC134a', 'HFC143a', 'N2O', 'SF6']:
-	# 	for t0 in range(defaults_and_utilities.getPulseDataLength()):
-	# 		Wpt_dict[(p, float(t0))] = Pulse[p][1 + t0]*scaleCelsius/Pulse[p][0]
 	Wpt_dict = get_warming_effects(scenario) # Get warming effects in degrees Celsius in each period, based on the solution vpt.
-
-	# 2. Bids. ------------------------------------------------------------------------------------------
 	Bapt, Uapt, APT_set, PT_set = read_bids(scenario)
 
-	# 3. Set up model. ------------------------------------------------------------------------------------------
 	Pollutants = sorted(list(set([p for p,t in PT_set])))
 	BidStepSet = {}
 	for (p,t) in PT_set: BidStepSet[p,t] = []
@@ -430,7 +379,10 @@ def run_SMDAMAGE_for_tau(scenario): # This version finds the optimal tau.
 	vpt = {(p,t): LpVariable("vpt(" + p + "," + str(t) + ")", None, None) for (p, t) in PT_set} # Must be a free variable.
 
 	Emitters = defaults_and_utilities.getEmitters() # Emitters face tax tau. Others do not.
-
+	
+	# Agriculture and "Carbon" are in megatons of carbon (not CO2). Hector uses gigatons of carbon, so we need to convert Hector's gigatons warming effects to SMDAMAGE megatons decision variables and back again to Hector gigatons for validation.
+	Units = defaults_and_utilities.getUnits() # {'Agriculture':'mtC', 'Black_walnut_150':'mhectares', 'Black_walnut_10':'mhectares', 'Black_walnut_55':'mhectares', 'C2F6':'kt', 'CF4':'kt', 'CH4':'mt', 'Carbon':'mtC', 'HFC125':'kt', 'HFC134a':'kt', 'HFC143a':'kt', 'Loblolly_pine_150':'mhectares', 'Loblolly_pine_10':'mhectares', 'Loblolly_pine_24':'mhectares', 'N2O':'mt', 'Ponderosa_pine_150':'mhectares', 'Ponderosa_pine_10':'mhectares', 'Ponderosa_pine_103':'mhectares', 'Seaweed':'mt', 'SF6':'kt'}
+	
 	# You might want to solve the model for multiple BeginConstraintYears.
 	for BeginConstraintYear in range(int(defaults_and_utilities.getFirstConstrainedYear()), int(defaults_and_utilities.getFirstConstrainedYear()) + 1, 1):
 		ConstraintPeriods = [float(BeginConstraintYear) + float(t)/float(hector_interface.getPeriodsPerYear()) for t in range(hector_interface.getPeriodsPerYear()*(defaults_and_utilities.getPulseDataLength() + int(defaults_and_utilities.getStartYear()) - int(BeginConstraintYear)))] # e.g., 2120, 2120.5, 2121, 2121.5, ..., 2301
@@ -544,56 +496,9 @@ def run_SMDAMAGE_for_tau(scenario): # This version finds the optimal tau.
 
 # This is a modified copy of run_SMDAMAGE(). Must be revenue neutral. Should use updated Wpt values.
 def run_SMDAMAGE_short_auctions(scenario): # Solve a sequence of SMDAMAGE models with 4-year auctions.
-	AllBidPeriods = defaults_and_utilities.getBidPeriods()
-	
-	# All objective function coefficients should be millions of dollars. So a bid of 1 is a bid for $1 million per unit of the chemical.
-	# Caution, Carbon is 'ffi' in pulsefile.
-	# Chemicals = ['Agriculture', 'Black_walnut', 'C2F6', 'CF4', 'CH4', 'Carbon', 'HFC125', 'HFC134a', 'HFC143a', 'Loblolly_pine', 'N2O', 'Ponderosa_pine', 'Seaweed', 'SF6']
-	
-	# Agriculture and "Carbon" are in megatons of carbon (not CO2). Hector uses gigatons of carbon, so we need to convert Hector's gigatons warming effects to SMDAMAGE megatons decision variables and back again to Hector gigatons for validation.
-	Units = defaults_and_utilities.getUnits()
-	Treetypes = defaults_and_utilities.getTreeTypes() #['Loblolly_pine_150', 'Ponderosa_pine_150', 'Black_walnut_150', 'Loblolly_pine_10', 'Ponderosa_pine_10', 'Black_walnut_10', 'Loblolly_pine_24', 'Ponderosa_pine_103', 'Black_walnut_55']
-	
-	# 1. Warming effects.
 	print ("\nSMDAMAGE short auctions. " + defaults_and_utilities.getExperimentTag(scenario) + ". " + time.asctime(time.localtime(time.time())) + ".")
-	# Pulse = hector_interface.getPulse() # Reads the Pulse input file.
-
-	# # Wpt0 = a unit emission of pollutant or planting p induces degrees Celsius/kg marginal warming Wpt0[p, t0], t0 years after emission or tree planting.
-	# # Time subscripts are floats because periods could be more often than years, e.g., 2025.0, 2025.5, ...
-	# Wpt_dict = {(p, float(t0)): 0.0 for p in Emitters + Removers for t0 in range(defaults_and_utilities.getPulseDataLength())} # >= 0.
-	# scaleCelsius = 1000.0 # Thousandths of a degree.
-
-	# if scenario.use_updated_Wpt: Wpt_pkl = defaults_and_utilities.open_pkl("SMDAMAGE_fitted_Wpt") # Retrieve the updated Wpt values from SMDAMAGE_fit_W.
-	# for t0 in range(defaults_and_utilities.getPulseDataLength()): # Divide by Pulse[p][0] for Hector greenhouse gasses to normalize the pulse size.
-	# 	# Carbon. Degrees C in warmingperiod per million tons emitted in emissionperiod. Carbon pulse units are degrees C/gigaton (ffi: GtC/yr), hence divide Carbon pulse by 1000 to convert GtC to MtC.
-	# 	if scenario.use_updated_Wpt: # If not variable in SMDAMAGE_Fit_W, then it will be the same as in the original pulse file.
-	# 		Wpt_dict [('luc', float(t0))] = Wpt_pkl[('luc', float(t0))] 
-	# 		Wpt_dict [('Carbon', float(t0))] = Wpt_pkl[('Carbon', float(t0))]
-	# 	else:
-	# 		Wpt_dict [('luc', float(t0))] = Pulse['luc'][1 + t0]*scaleCelsius/Pulse['ffi'][0]/1000.0
-	# 		Wpt_dict [('Carbon', float(t0))] = Pulse['ffi'][1 + t0]*scaleCelsius/Pulse['ffi'][0]/1000.0
+	AllBidPeriods = defaults_and_utilities.getBidPeriods()
 		
-	# 	if scenario.is_removal_luc: Wpt_dict [('Agriculture', float(t0))] = - Wpt_dict [('luc', float(t0))]
-	# 	else: Wpt_dict [('Agriculture', float(t0))] = - Wpt_dict [('Carbon', float(t0))]
-		
-	# 	# Seaweed has same cooling effects as Agriculture, following either "luc" or "ffi" in Hector. Degrees C in warmingperiod per million tons emitted in emissionperiod. Divide by 1000 because Carbon pulse units are degrees C/gigaton.
-	# 	Wpt_dict [('Seaweed', float(t0))] = Wpt_dict [('Agriculture', float(t0))]
-		
-	# # A hector of tree planting convolves into future carbon removal.
-	# Treetype_carbon_removal = defaults_and_utilities.get_Treetype_carbon_removal(Treetypes)
-	# # A hector of tree planting convolves into future carbon removal, which convolves into future cooling.
-	# # Forestry, cooling effects. Convolution of tree growth with carbon pulse. Degrees C in warmingperiod per million tons sequestered in emissionperiod. Divide by 1000 because Carbon pulse units are degrees C/gigaton.
-	# for tree in Treetypes: # Tree is planted in year 0. Tree sequesters TonsSequesteredPerPeriod tonnes/hectare in each sequesterperiod from 0 to 155.
-	# 	for treegrowthyear in range(0, 156): # Length of tree contract.
-	# 		for coolingyear in range(treegrowthyear, defaults_and_utilities.getPulseDataLength()): # Growth in the last year of the contract has future cooling effects.
-	# 			# Forestry has same cooling effects as Agriculture, following either "luc" or "ffi" in Hector, convolved with tree growth. 
-	# 			Wpt_dict[(tree, float(coolingyear))] += Treetype_carbon_removal[tree][treegrowthyear]*Wpt_dict[('Agriculture', float(coolingyear - treegrowthyear))]*scaleCelsius/1000.0
-
-	# # 	CH4: MtCH4/yr, N2O: MtN2O-N/yr, C: MtC/yr, NMVOC: Mt/yr, BC: Mt/yr, OC: Mt/yr,
-	# # 	CF4: kt/yr, C2F6: kt/yr, HFC125: kt/yr, HFC134a: kt/yr, HFC143a: kt/yr, CFC11: kt/yr, CFC12: kt/yr, HCF22: kt/yr]
-	# for p in ['C2F6', 'CF4', 'CH4', 'HFC125', 'HFC134a', 'HFC143a', 'N2O', 'SF6']:
-	# 	for t0 in range(defaults_and_utilities.getPulseDataLength()):
-	# 		Wpt_dict[(p, float(t0))] = Pulse[p][1 + t0]*scaleCelsius/Pulse[p][0]
 	Wpt_dict = get_warming_effects(scenario) # Get warming effects in degrees Celsius in each period, based on the solution vpt.
 
 	Bapt, Uapt, APT_set, PT_set = read_bids(scenario)
@@ -606,6 +511,9 @@ def run_SMDAMAGE_short_auctions(scenario): # Solve a sequence of SMDAMAGE models
 	for (a,p,t) in APT_set:
 		TotalU[p,t] += Uapt[a,p,t]
 		BidStepSet[p,t].append(a)
+
+	# Agriculture and "Carbon" are in megatons of carbon (not CO2). Hector uses gigatons of carbon, so we need to convert Hector's gigatons warming effects to SMDAMAGE megatons decision variables and back again to Hector gigatons for validation.
+	Units = defaults_and_utilities.getUnits()
 
 	# Create CSV file with headers.
 	with open(defaults_and_utilities.SMDAMAGE_output_file_name(scenario), 'w') as myoutputfile:
@@ -620,8 +528,10 @@ def run_SMDAMAGE_short_auctions(scenario): # Solve a sequence of SMDAMAGE models
 	FixedPeriods = []
 	Fixed_Vpt = {(p,t): 0.0 for (p,t) in PT_set}
 	
+	# All objective function coefficients should be millions of dollars. So a bid of 1 is a bid for $1 million per unit of the chemical.
+	# Reminder, Carbon is 'ffi' in pulsefile.
 	# Emitters face tax tau. Others do not.
-	defaults_and_utilities.getEmitters() # ['C2F6', 'CF4', 'CH4', 'Carbon', 'HFC125', 'HFC134a', 'HFC143a', 'N2O', 'SF6']
+	Emitters = defaults_and_utilities.getEmitters() # ['C2F6', 'CF4', 'CH4', 'Carbon', 'HFC125', 'HFC134a', 'HFC143a', 'N2O', 'SF6']
 	
 	local_tau = scenario.tau # We have to change tau when the temperature is low enough (at the end of this loop), but we don't want to change the output filename.
 	# See the end of the loop for the change in tau.
@@ -691,10 +601,6 @@ def run_SMDAMAGE_short_auctions(scenario): # Solve a sequence of SMDAMAGE models
 				else: line.append('.')
 				myoutputfile.write(','.join(line) + '\n')
 		
-		# If near-term auctions are likely to achieve the target temperature, cancel the removal tax and retain carbon neutrality.
-		# local_tau = max (1.0, local_tau - 0.01) # Example of a policy to reduce the tax rate over time.
-		# if scenario.initial_temperature + temperatureChange[float(startyear+1)].varValue < 900.0 and startyear+1 >= 2050: local_tau = 1.0 # Quit early to reduce excess cooling.
-		# if scenario.initial_temperature + temperatureChange[float(startyear+1)].varValue < 100.0 or startyear+1 >= 2100: local_tau = 1.0
 		if startyear+1 >= defaults_and_utilities.getFirstConstrainedYear(): local_tau = 1.0
 		
 		# SMDAMAGE_fit_W uses the vpt pickle file.
@@ -724,7 +630,7 @@ def get_SMDAMAGE_temps_actual_and_taxed(scenario):
 	return taxed_temps, SMDAMAGE_temperature
 
 # ========================================================================================
-# Part VI. Main. Run SMDAMAGE, convert SMDAMAGE output to Hector input, run Hector, and compare temperatures.
+# Part VI. Main. Run experiments with SMDAMAGE; convert SMDAMAGE output to Hector input, run Hector, and compare temperatures.
 # ========================================================================================
 if __name__ == "__main__":
 	# Preliminary: get pulses from Hector.
@@ -733,11 +639,11 @@ if __name__ == "__main__":
 	# VI.A. Figure 1. SMDAMAGE uncalibrated. Uses the same tau for every year.
 	figure1 = defaults_and_utilities.Scenario(comment = "Fig1", discount_rate = 0.03, initial_temperature = 1400.0, tau = 2.5, is_revenue_neutral = True, is_removal_luc = False, use_updated_Wpt = False)
 	run_SMDAMAGE(figure1)
-	# hector_interface.run_Hector_with_SMDAMAGE_solution(figure1) # 3. Run Hector on SMDAMAGE output.
-	# plotting_utils.plot_temps_SMDAMAGE_and_Hector(figure1, *get_SMDAMAGE_temps_actual_and_taxed(figure1), hector_interface.get_Hector_temperature(figure1), defaults_and_utilities.getOutputDirectory, defaults_and_utilities.experimentTag_to_file_name) 
-	# calibrated_initial_temperature = wpt_calibration.run_SMDAMAGE_fit_W(figure1) # Should return 971.24975.
+	hector_interface.run_Hector_with_SMDAMAGE_solution(figure1) # 3. Run Hector on SMDAMAGE output.
+	plotting_utils.plot_temps_SMDAMAGE_and_Hector(figure1, *get_SMDAMAGE_temps_actual_and_taxed(figure1), hector_interface.get_Hector_temperature(figure1), defaults_and_utilities.getOutputDirectory, defaults_and_utilities.experimentTag_to_file_name) 
+	calibrated_initial_temperature = wpt_calibration.run_SMDAMAGE_fit_W(figure1) # Should return 971.24975.
 
-	# # # VI.B. Figure 1. SMDAMAGE calibrated. discount_rate 0.03, initial_temperature 971.24975, tau 2.5, is_revenue_neutral True, is_removal_luc False, use_updated_Wpt False.
+	# # VI.B. Figure 1. SMDAMAGE calibrated. discount_rate 0.03, initial_temperature 971.24975, tau 2.5, is_revenue_neutral True, is_removal_luc False, use_updated_Wpt False.
 	# figure1.initial_temperature = calibrated_initial_temperature
 	# figure1.use_updated_Wpt = True
 	# run_SMDAMAGE(figure1) #  Uses the same tau for every year.
@@ -752,7 +658,7 @@ if __name__ == "__main__":
 	# run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Fig2", discount_rate = 0.03, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = False, tau = 2.5, is_removal_luc = False, use_updated_Wpt = True))
 	# run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Fig2", discount_rate = 0.06, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = False, tau = 2.5, is_removal_luc = False, use_updated_Wpt = True))
 
-	# # # VI.D. Figures 3-5, revenue neutrality: discount_rate to 0.03, initial_temperature 971.24975, is_revenue_neutral True, tau ranges from 1.0 to 2.5, is_removal_luc False, use_updated_Wpt True.
+	# # VI.D. Figures 3-5, revenue neutrality: discount_rate to 0.03, initial_temperature 971.24975, is_revenue_neutral True, tau ranges from 1.0 to 2.5, is_removal_luc False, use_updated_Wpt True.
 	# calibrated_initial_temperature = 971.24975
 	# # # Sequentially run SMDAMAGE with tau = 1, 1.5, 2.0, 2.5.
 	# run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Figs3-5", discount_rate = 0.03, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = True, tau = 1.0, is_removal_luc = False, use_updated_Wpt = True))
@@ -760,14 +666,14 @@ if __name__ == "__main__":
 	# run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Figs3-5", discount_rate = 0.03, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = True, tau = 2.0, is_removal_luc = False, use_updated_Wpt = True))
 	# run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Figs3-5", discount_rate = 0.03, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = True, tau = 2.5, is_removal_luc = False, use_updated_Wpt = True))
 
-	# # VI.E. # Estimate 2. Concluding paragraph after Figures 3-5.
+	# VI.E. # Estimate 2. Concluding paragraph after Figures 3-5.
 	# run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Figs3-5_after", discount_rate = 0.03, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = True, tau = 1.6, is_removal_luc = False, use_updated_Wpt = True))
 
-	# # VII. Strength of contracts. (Figure 6 comes from the Pulse input data.)
-	# # The base scenario is discount_rate to 0.03, initial_temperature 971.24975, is_revenue_neutral True, tau is 1.55, is_removal_luc to False, use_updated_Wpt = True, but with an earlier Wpt, so use False here.
+	# VII. Strength of contracts. (Figure 6 comes from the Pulse input data.)
+	# The base scenario is discount_rate to 0.03, initial_temperature 971.24975, is_revenue_neutral True, tau is 1.55, is_removal_luc to False, use_updated_Wpt = True, but with an earlier Wpt, so use False here.
 
-	# # VII.A. Uncalibrated SMDAMAGE.
-	# # For the case of strong contracts, use discount_rate to 0.03, initial_temperature 971.24975, is_revenue_neutral True, tau is 2.4 (you can vary tau in repeat runs of SMDAMAGE to confirm), is_removal_luc to True, use_updated_Wpt = False.
+	# VII.A. Uncalibrated SMDAMAGE.
+	# For the case of strong contracts, use discount_rate to 0.03, initial_temperature 971.24975, is_revenue_neutral True, tau is 2.4 (you can vary tau in repeat runs of SMDAMAGE to confirm), is_removal_luc to True, use_updated_Wpt = False.
 	# contracts_scenario = defaults_and_utilities.Scenario(comment = "Contracts", discount_rate = 0.03, initial_temperature = 971.24975, is_revenue_neutral = True, tau = 2.1, is_removal_luc = True, use_updated_Wpt = False)
 	# SMDAMAGE_final_temp = run_SMDAMAGE(contracts_scenario)
 	# hector_interface.run_Hector_with_SMDAMAGE_solution(contracts_scenario)
@@ -784,22 +690,22 @@ if __name__ == "__main__":
 	# hector_interface.run_Hector_with_SMDAMAGE_solution(contracts_scenario)
 	# plotting_utils.plot_temps_SMDAMAGE_and_Hector(contracts_scenario, *get_SMDAMAGE_temps_actual_and_taxed(contracts_scenario), hector_interface.get_Hector_temperature(contracts_scenario), defaults_and_utilities.getOutputDirectory, defaults_and_utilities.experimentTag_to_file_name)
 
-	# # VIII. Short auctions, 2 years at a time.
-	# # VIII.A. Calibrate with a long-term model.
-	# Short_auctions_scenario = defaults_and_utilities.Scenario(comment = "Short auctions", discount_rate = 0.03, initial_temperature = 971.24975, tau = 1.5, is_revenue_neutral = True, is_removal_luc = False, use_updated_Wpt = False)
+	# VIII. Short auctions, 2 years at a time.
+	# VIII.A. Calibrate with a long-term model.
+	Short_auctions_scenario = defaults_and_utilities.Scenario(comment = "Short auctions", discount_rate = 0.03, initial_temperature = 971.24975, tau = 1.5, is_revenue_neutral = True, is_removal_luc = False, use_updated_Wpt = False)
 	# run_SMDAMAGE(Short_auctions_scenario) # A long auction for calibrating the short auctions.
 	# hector_interface.run_Hector_with_SMDAMAGE_solution(Short_auctions_scenario) # 3. Run Hector on SMDAMAGE output.
 
-	# # calibrated_initial_temperature = wpt_calibration.run_SMDAMAGE_fit_W(Short_auctions_scenario) # Should return 895.95254.
+	# calibrated_initial_temperature = wpt_calibration.run_SMDAMAGE_fit_W(Short_auctions_scenario) # Should return 895.95254.
 
-	# # VIII.B. Run the short auctions.
-	# Short_auctions_scenario.initial_temperature = 895.95254 # calibrated_initial_temperature
-	# Short_auctions_scenario.use_updated_Wpt = True # Use this updated_Wpt for the short auctions.
-	# run_SMDAMAGE_short_auctions(Short_auctions_scenario) # Results in excess cooling. Hence the search for tau by year.
+	# VIII.B. Run the short auctions.
+	Short_auctions_scenario.initial_temperature = 895.95254 # calibrated_initial_temperature
+	Short_auctions_scenario.use_updated_Wpt = True # Use this updated_Wpt for the short auctions.
+	run_SMDAMAGE_short_auctions(Short_auctions_scenario) # Results in excess cooling. Hence the search for tau by year.
 
-	# # Search for tau. Starts with tau = 1.7 for every constrained year, then uses subgradient optimization to choose a tau for each year.
-	# tau_search = defaults_and_utilities.Scenario(comment = "Tau search", discount_rate = 0.03, initial_temperature = 971.24975, tau = 1.7, is_revenue_neutral = True, is_removal_luc = False, use_updated_Wpt = True)
-	# run_SMDAMAGE_for_tau (tau_search) # Repeated solution of SMDAMAGE with subgradient optimization on tau.
+	# Search for tau. Starts with tau = 1.7 for every constrained year, then uses subgradient optimization to choose a tau for each year.
+	tau_search = defaults_and_utilities.Scenario(comment = "Tau search", discount_rate = 0.03, initial_temperature = 971.24975, tau = 1.7, is_revenue_neutral = True, is_removal_luc = False, use_updated_Wpt = True)
+	run_SMDAMAGE_for_tau (tau_search) # Repeated solution of SMDAMAGE with subgradient optimization on tau.
 
 	# wpt_calibration.write_fitted_Wpt_to_csv() # if you want to analyze the Wpt values in Excel.
 	import winsound
