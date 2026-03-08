@@ -36,7 +36,6 @@ def write_fitted_Wpt_to_csv(): # Write the fitted Wpt values to a CSV file in ro
 		for pollutant in pollutants: writer.writerow([pollutant] + [Wpt_dict.get((pollutant, year), '') for year in years])
 
 def run_SMDAMAGE_fit_W(scenario):
-	
 	# 	If scenario.is_removal_luc,
 	# 		apply Wpt_dict[('luc',t)] for ['Agriculture', 'Seaweed'] + getTreetypes().
 	# 		fit both 'Carbon' and 'luc'.
@@ -44,8 +43,8 @@ def run_SMDAMAGE_fit_W(scenario):
 	# 		fit only Carbon, and
 	# 		apply Wpt_dict[('Carbon',t)] for ['Agriculture', 'Seaweed'] + getTreetypes().
 	
-	Emitters = ['Carbon', 'C2F6', 'CF4', 'CH4', 'HFC125', 'HFC134a', 'HFC143a', 'N2O','SF6']
-	Removers = ['Agriculture', 'Seaweed', 'Loblolly_pine_150', 'Ponderosa_pine_150', 'Black_walnut_150', 'Loblolly_pine_10', 'Ponderosa_pine_10', 'Black_walnut_10', 'Loblolly_pine_24', 'Ponderosa_pine_103', 'Black_walnut_55']
+	Emitters = defaults_and_utilities.getEmitters() # ['Carbon', 'C2F6', 'CF4', 'CH4', 'HFC125', 'HFC134a', 'HFC143a', 'N2O','SF6']
+	Removers = defaults_and_utilities.getRemovers() # ['Agriculture', 'Seaweed', 'Loblolly_pine_150', 'Ponderosa_pine_150', 'Black_walnut_150', 'Loblolly_pine_10', 'Ponderosa_pine_10', 'Black_walnut_10', 'Loblolly_pine_24', 'Ponderosa_pine_103', 'Black_walnut_55']
 	Pulse = hector_interface.getPulse() # Reads the Pulse input file. Includes 'luc'.
 
 	# Load default Wpt_dict. ------------------------------------------------------------------------------------------
@@ -53,7 +52,7 @@ def run_SMDAMAGE_fit_W(scenario):
 	Wpt_dict = {(p, float(t0)): 0.0 for p in Emitters + Removers for t0 in range(defaults_and_utilities.getPulseDataLength())} # Time subscripts are floats because periods could be more often than years, e.g., 2025.0, 2025.5, ...
 	scaleCelsius = 1000.0 # Thousandths of a degree.
 
-	for p in ['C2F6', 'CF4', 'CH4', 'HFC125', 'HFC134a', 'HFC143a', 'N2O', 'SF6']:
+	for p in defaults_and_utilities.getChemicals(): #['C2F6', 'CF4', 'CH4', 'HFC125', 'HFC134a', 'HFC143a', 'N2O', 'SF6']:
 		for t0 in range(defaults_and_utilities.getPulseDataLength()): Wpt_dict[(p, float(t0))] = Pulse[p][1 + t0]*scaleCelsius/Pulse[p][0]
 
 	for t0 in range(defaults_and_utilities.getPulseDataLength()):  # Divide by Pulse[p][0] for Hector greenhouse gasses to normalize the pulse size.
@@ -86,7 +85,7 @@ def run_SMDAMAGE_fit_W(scenario):
 	
 	# Construct PT_set. ------------------------------------------------------------------------------------------
 	Constant_PT_set = set() # Use constant W for activities you're not trying to fit.
-	for p in ['C2F6', 'CF4', 'CH4', 'HFC125', 'HFC134a', 'HFC143a', 'N2O', 'SF6']:
+	for p in defaults_and_utilities.getChemicals():
 		for t in defaults_and_utilities.getBidPeriods(): Constant_PT_set.add((p,t))
 	# if scenario.is_removal_luc:
 	# 	for t in defaults_and_utilities.getBidPeriods(): Constant_PT_set.add(('Carbon',t))
