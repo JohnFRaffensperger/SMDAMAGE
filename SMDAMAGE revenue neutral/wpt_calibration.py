@@ -18,7 +18,7 @@ import defaults_and_utilities
 # Import the main module with spaces in filename
 import os
 current_dir = os.path.dirname(os.path.abspath(__file__))
-main_file_path = os.path.join(current_dir, "SMDAMAGE revenue neutral 2025 02 03.py")
+main_file_path = os.path.join(current_dir, "SMDAMAGE revenue neutral.py")
 spec = importlib.util.spec_from_file_location("smdamage_main", main_file_path)
 smdamage_main = importlib.util.module_from_spec(spec)
 sys.modules["smdamage_main"] = smdamage_main
