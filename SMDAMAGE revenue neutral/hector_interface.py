@@ -66,10 +66,10 @@ def readTemperatureOutput(outputfilename): # Read the temperature output from He
 					templist.append(float(fields[5]))
 	return  yearlist, templist
 
-# Output is Pulses_by_chemical.txt, which contains the marginal temperature changes for each chemical.
-# Run once. Then you've got it and don't need to run it again.
-def get_Pulses_from_Hector(): # Output is Pulses_by_chemical.txt in the Hector directory. Move that to your /data/ directory.
-	# Start here.
+# Run once. Output is Pulses_by_chemical.txt, which contains the marginal temperature changes for each chemical.
+# Move Pulses_by_chemical.txt from the Hector directory to your /data/ directory.
+# Then you've got it and don't need to run it again.
+def get_Pulses_from_Hector(): 
 	pulse_year = 2005 # Chosen because it's before the phaseout of some refrigerants.
 	pathname = "D:/Work documents/2 Research/Global warming/Numerical Simulation/hector-2.0.1-Windows/"
 	# pathname = "C:/Users/johnr/Documents/Work documents/2 Research/Global warming/Numerical Simulation/hector-2.0.1-Windows/"
@@ -78,7 +78,7 @@ def get_Pulses_from_Hector(): # Output is Pulses_by_chemical.txt in the Hector d
 	file_list = {"Hector_ini": "input/hector_rcp26_pulsed.ini", # You should make this in advance. In section [core], replace "run_name=rcp26" with "run_name=rcp26_emissions_pulsed". Replace text "RCP26_emissions.csv" with "RCP26_emissions_pulsed.csv".
 				"Base_emissions_input": "input/emissions/RCP26_emissions.csv", # Supplied with Hector or make it yourself. Constant, should not change.
 				"Base_temperature_output": "output/outputstream_rcp26.csv", # Supplied with Hector or make it yourself. Constant, should not change.
-				"Hector_spew": "hector_spew_all_chemicals.txt", # created here by Hector. Absorbs Hector's command line reactions.
+				"Hector_spew": "hector_spew_all_chemicals.txt", # created here by Hector. Records Hector's command line output.
 				"Hector_batch": "run_Hector_all_chemicals_pulsed.bat", # created by this code. Runs Hector on the right files.
 				"Pulsed_emissions_input": "input/emissions/RCP26_emissions_pulsed.csv", # created by Hector when you run this code. Contains the emissions pulse input.
 				"Pulsed_temperature_output": "output/outputstream_rcp26_pulsed.csv", # Created here by Hector. Contains the resulting temperatures from the emissions pulse. Delete the old one, as this code simply appends new lines.
@@ -92,13 +92,13 @@ def get_Pulses_from_Hector(): # Output is Pulses_by_chemical.txt in the Hector d
 
 	# 2. Create pulse.
 	# Full list of chemicals in Hector.
-	chemicals = ['ffi_emissions', 'luc_emissions', 'CH4_emissions', 'N2O_emissions', 'SOx', 'SO2_emissions', 'CO_emissions', 'NMVOC_emissions', 'NOX_emissions', 'BC_emissions', 'OC_emissions', 'NH3',\
-		'CF4_emissions', 'C2F6_emissions', 'C6F14', 'HFC23_emissions', 'HFC32_emissions', 'HFC4310_emissions', 'HFC125_emissions', 'HFC134a_emissions', 'HFC143a_emissions', 'HFC227ea_emissions', 'HFC245fa_emissions',\
-		'SF6_emissions', 'CFC11_emissions', 'CFC12_emissions', 'CFC113_emissions', 'CFC114_emissions', 'CFC115_emissions', 'CCl4_emissions', 'CH3CCl3_emissions', 'HCF22_emissions', 'HCF141b_emissions',\
-		'HCF142b_emissions', 'halon1211_emissions', 'HALON1202', 'halon1301_emissions', 'halon2402_emissions', 'CH3Br_emissions', 'CH3Cl_emissions']
+	# chemicals = ['ffi_emissions', 'luc_emissions', 'CH4_emissions', 'N2O_emissions', 'SOx', 'SO2_emissions', 'CO_emissions', 'NMVOC_emissions', 'NOX_emissions', 'BC_emissions', 'OC_emissions', 'NH3',\
+	# 	'CF4_emissions', 'C2F6_emissions', 'C6F14', 'HFC23_emissions', 'HFC32_emissions', 'HFC4310_emissions', 'HFC125_emissions', 'HFC134a_emissions', 'HFC143a_emissions', 'HFC227ea_emissions', 'HFC245fa_emissions',\
+	# 	'SF6_emissions', 'CFC11_emissions', 'CFC12_emissions', 'CFC113_emissions', 'CFC114_emissions', 'CFC115_emissions', 'CCl4_emissions', 'CH3CCl3_emissions', 'HCF22_emissions', 'HCF141b_emissions',\
+	# 	'HCF142b_emissions', 'halon1211_emissions', 'HALON1202', 'halon1301_emissions', 'halon2402_emissions', 'CH3Br_emissions', 'CH3Cl_emissions']
 
-	# List of chemicals in  SMDAMAGE.
-	# chemicals = ['ffi_emissions', 'CH4_emissions', 'N2O_emissions', 'CF4_emissions', 'C2F6_emissions', 'HFC125_emissions', 'HFC134a_emissions', 'HFC143a_emissions', 'SF6_emissions']
+	# List of chemicals in  SMDAMAGE. We need to pulse only the ones in SMDAMAGE.
+	chemicals = ['ffi_emissions', 'CH4_emissions', 'N2O_emissions', 'CF4_emissions', 'C2F6_emissions', 'HFC125_emissions', 'HFC134a_emissions', 'HFC143a_emissions', 'SF6_emissions']
 	for chemical in chemicals:
 		
 		#3. Create an emissions pulse in the emissions input file.
