@@ -6,176 +6,120 @@ Provides functions to query the SQLite database instead of reading CSV files dir
 
 import sqlite3
 import os
+import csv
 
 # Database file name
 DB_NAME = "smdamage_data.db"
 
-class SmdamageDataDB:
-    """Class to handle database connections and queries for SMDAMAGE data"""
+def _execute_query(sql, params=None, db_path=None):
+    """Execute SQL query and return results"""
+    if db_path is None: db_path = DB_NAME
+    if not os.path.exists(db_path):
+        raise FileNotFoundError(f"Database '{db_path}' not found. Run create_database.py first.")
     
-    def __init__(self, db_path=None):
-        """Initialize database connection"""
-        if db_path is None:
-            db_path = DB_NAME
-        
-        if not os.path.exists(db_path):
-            raise FileNotFoundError(f"Database '{db_path}' not found. Run create_database.py first.")
-        
-        self.db_path = db_path
-    
-    def _get_connection(self):
-        """Get database connection"""
-        return sqlite3.connect(self.db_path)
-    
-    def get_bids(self, bidder_name):
-        """Get bid data for any bidder from the unified bids table
-        
-        Args:
-            bidder_name: Name of the bidder (must exist in bidders table)
-            
-        Returns:
-            List of tuples with bid data (price_per_unit, quantity_units)
-        """
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        
-        # First, check if bidder exists
-        cursor.execute("SELECT bidder FROM bidders WHERE bidder = ?", (bidder_name,))
-        bidder_info = cursor.fetchone()
-        
-        if not bidder_info:
-            conn.close()
-            raise ValueError(f"Bidder '{bidder_name}' not found in bidders table")
-        
-        # Get bid data from unified bids table
-        cursor.execute('''
-            SELECT price_per_unit, quantity_units 
-            FROM bids 
-            WHERE bidder = ? 
-            ORDER BY id
-        ''', (bidder_name,))
-        
-        data = cursor.fetchall()
-        conn.close()
-        return data
-    
-    def get_warming_factors(self, hector_name):
-        """Get warming factor data for a specific hector chemical"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        
-        # Build query to select all year columns
-        year_columns = ', '.join([f'year_{i:03d}' for i in range(1, 297)])
-        
-        cursor.execute(f"""
-            SELECT emission_factor, hector_units, {year_columns}
-            FROM warming_factors 
-            WHERE hector_name = ?
-        """, (hector_name,))
-        
-        result = cursor.fetchone()
-        conn.close()
-        
-        if result:
-            emission_factor = result[0]
-            hector_units = result[1]
-            data_values = list(result[2:])  # All the year_xxx columns as a list
-            
-            return {
-                'emission_factor': emission_factor,
-                'hector_units': hector_units,
-                'data_values': data_values
-            }
-        else:
-            return None
-    
-    def get_hector_names(self):
-        """Get list of all hector names in warming factor data"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT DISTINCT hector_name FROM warming_factors")
-        names = [row[0] for row in cursor.fetchall()]
-        
-        conn.close()
-        return names
-    
-    def get_forestry_removal(self, bidder, year=None):
-        """Get forestry removal data for a specific bidder, optionally filtered by year"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        
-        query = "SELECT bidder, year, tons_per_hectare_per_year FROM forestry_removal"
-        params = [bidder]
-        conditions = ["bidder = ?"]
-        
-        if year:
-            conditions.append("year = ?") 
-            params.append(year)
-            
-        query += " WHERE " + " AND ".join(conditions)
-        query += " ORDER BY year"
-        
-        cursor.execute(query, params)
-        results = cursor.fetchall()
-        conn.close()
-        
-        return results
-    
-    def get_all_forestry_bidders(self):
-        """Get list of all forestry bidders in removal data"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT DISTINCT bidder FROM forestry_removal ORDER BY bidder")
-        bidders = [row[0] for row in cursor.fetchall()]
-        
-        conn.close()
-        return bidders
-    
-    def query_custom(self, sql_query, params=None):
-        """Execute a custom SQL query"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        
-        if params:
-            cursor.execute(sql_query, params)
-        else:
-            cursor.execute(sql_query)
-        
-        data = cursor.fetchall()
-        conn.close()
-        
-        return data
-    
-    def get_database_info(self):
-        """Get information about database tables and record counts"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        
-        # Get list of tables
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        tables = cursor.fetchall()
-        
-        info = {}
-        for table in tables:
-            table_name = table[0]
-            cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
-            count = cursor.fetchone()[0]
-            info[table_name] = count
-        
-        conn.close()
-        return info
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    if params: cursor.execute(sql, params)
+    else: cursor.execute(sql)
+    result = cursor.fetchall()
+    conn.close()
+    return result
 
-# Global database instance (singleton pattern)
-_db_instance = None
+def _execute_insert(sql, params=None, db_path=None):
+    """Execute SQL insert/update/delete statements"""
+    if db_path is None: db_path = DB_NAME
+    if not os.path.exists(db_path):
+        raise FileNotFoundError(f"Database '{db_path}' not found. Run create_database.py first.")
+    
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    if params: cursor.execute(sql, params)
+    else: cursor.execute(sql)
+    conn.commit()
+    conn.close()
 
-def get_db():
-    """Get the global database instance"""
-    global _db_instance
-    if _db_instance is None:
-        _db_instance = SmdamageDataDB()
-    return _db_instance
+def add_bidder(bidder_name, csv_filename, bidder_class='Emitter', units='mtC', contract_years=1, hector_name='ffi_emissions', description=''):
+    """Add bidder data from CSV file to database
+    
+    Args:
+        bidder_name: Name of the bidder to add
+        csv_filename: Path to CSV file with bid data (price, quantity format)
+        bidder_class: Bidder class - 'Emitter' or 'Remover' (default: 'Emitter')
+        units: Units for the bidder (default: 'mtC')
+        contract_years: Contract duration in years (default: 1)
+        hector_name: Associated hector name (default: 'ffi_emissions')
+        description: Description of the bidder (default: '')
+    """
+    if not os.path.exists(csv_filename):
+        raise FileNotFoundError(f"CSV file '{csv_filename}' not found")
+    
+    # First, add bidder to bidders table with all columns if not exists  
+    try:
+        _execute_insert(
+            "INSERT INTO bidders (bidder, class, units, contract_years, hector_name, description) VALUES (?, ?, ?, ?, ?, ?)", 
+            (bidder_name, bidder_class, units, contract_years, hector_name, description)
+        )
+        print(f"Added new bidder: {bidder_name} (class={bidder_class}, units={units}, contract_years={contract_years}, hector_name={hector_name})")
+    except sqlite3.IntegrityError:
+        print(f"Bidder '{bidder_name}' already exists")
+    
+    # Read CSV file and insert bid data
+    with open(csv_filename, 'r') as file:
+        csv_reader = csv.reader(file)
+        header = next(csv_reader)  # Skip header row
+        
+        bid_count = 0
+        for row in csv_reader:
+            if len(row) >= 2:
+                price_per_unit = float(row[0])
+                quantity_units = float(row[1])
+                
+                _execute_insert(
+                    "INSERT INTO bids (bidder, price_per_unit, quantity_units) VALUES (?, ?, ?)",
+                    (bidder_name, price_per_unit, quantity_units)
+                )
+                bid_count += 1
+        
+        print(f"Inserted {bid_count} bid records for {bidder_name}")
+
+# add_bidder('Agriculture', 'Data/Agriculture_bids.csv', bidder_class='Emitter', units='mtC',  description='Agricultural carbon mitigation') 
+
+def get_bids(bidder_name):
+    """Get bid data for any bidder from the bids table
+    Args: bidder_name: Name of the bidder (must exist in bidders table)
+    Returns: List of tuples with bid data (price_per_unit, quantity_units)
+    """
+    # First, check if bidder exists
+    bidder_info = _execute_query("SELECT bidder FROM bidders WHERE bidder = ?", (bidder_name,))
+    if not bidder_info: raise ValueError(f"Bidder '{bidder_name}' not found in bidders table")
+    return _execute_query("SELECT price_per_unit, quantity_units FROM bids WHERE bidder = ? ORDER BY id", (bidder_name,))
+
+def get_warming_factors(hector_name):
+    """Get warming factor data for a specific hector chemical"""
+    results = _execute_query("SELECT emission_factor, hector_units, * FROM warming_factors WHERE hector_name = ?", (hector_name,))
+    
+    if results:
+        result = results[0]  # Take first record
+        emission_factor = result[0]
+        hector_units = result[1]
+        data_values = list(result[2:])  # All the year_xxx columns as a list
+        
+        return {'emission_factor': emission_factor, 'hector_units': hector_units, 'data_values': data_values}
+    else: return None
+
+def get_hector_names():
+    """Get list of all hector names in warming factor data"""
+    results = _execute_query ("SELECT DISTINCT hector_name FROM warming_factors")
+    return [row[0] for row in results]
+
+def get_forestry_carbon_removal(bidder):
+    """Get forestry removal data for a specific bidder"""
+    return _execute_query ("SELECT bidder, year, tons_per_hectare_per_year FROM forestry_removal WHERE bidder = ? ORDER BY year", (bidder,))
+
+def get_forestry_bidder_names():
+    """Get list of all forestry bidders in removal data"""
+    results = _execute_query ("SELECT DISTINCT bidder FROM forestry_removal ORDER BY bidder")
+    return [row[0] for row in results]
 
 # Test and demonstration functions
 def test_database_queries():
@@ -184,14 +128,6 @@ def test_database_queries():
     print("=" * 40)
     
     try:
-        db = get_db()
-        
-        # Test database info
-        print("📊 Database Info:")
-        info = db.get_database_info()
-        for table, count in info.items():
-            print(f"  • {table}: {count} records")
-        
         # Test unified bids function
         print("\n🌾 Agriculture bids (first 3):")
         ag_bids = get_bids('Agriculture')
@@ -215,7 +151,7 @@ def test_database_queries():
         
         # Test forestry removal function
         print("\n🌲 Forestry removal - Loblolly 150yr (years 0-5):")
-        forestry_seq = get_forestry_removal_data('Loblolly_pine_150')
+        forestry_seq = get_forestry_carbon_removal('Loblolly_pine_150')
         for row in forestry_seq[:6]:
             bidder = row[0]
             year = row[1]
@@ -224,9 +160,9 @@ def test_database_queries():
         
         # Test warming factors
         print("\n🌡️ Warming factors (first 3 chemicals):")
-        hector_names = get_all_hector_names()[:3]
+        hector_names = get_hector_names()[:3]
         for chemical in hector_names:
-            data = get_warming_factor_data(chemical)
+            data = get_warming_factors(chemical)
             print(f"  • {chemical}: {data['emission_factor']} {data['hector_units']}")
         
         print("\n✅ All database queries working correctly!")

@@ -128,7 +128,7 @@ def get_forestry_removal_from_database():
         Treetype_carbon_removal[bidder][year] = tons_per_hectare
     
     # Get unique bidders and years for reporting
-    forestry_bidders = db_interface.get_all_forestry_bidders()
+    forestry_bidders = db_interface.get_forestry_bidder_names()
     years = set(year for _, year, _ in forestry_data)
     
     print(f"🌲 Loaded removal data for {len(forestry_bidders)} forestry bidders, {len(years)} years")
