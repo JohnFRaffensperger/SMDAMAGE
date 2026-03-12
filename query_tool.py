@@ -21,6 +21,20 @@ class DatabaseExplorer:
         
         self.conn = sqlite3.connect(DB_NAME)
         self.cursor = self.conn.cursor()
+    
+    def __enter__(self):
+        """Context manager entry"""
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit - ensure connection is closed"""
+        if self.conn:
+            self.conn.close()
+    
+    def __del__(self):
+        """Destructor - ensure connection is closed"""
+        if hasattr(self, 'conn') and self.conn:
+            self.conn.close()
         
     def show_tables(self):
         """Show all tables in the database"""
@@ -205,34 +219,31 @@ def main():
     """Main entry point"""
     if len(sys.argv) > 1:
         # Command line mode
-        explorer = DatabaseExplorer()
-        
-        if sys.argv[1] == 'tables':
-            explorer.show_tables()
-        
-        elif sys.argv[1] == 'schema' and len(sys.argv) > 2:
-            explorer.show_table_schema(sys.argv[2])
-        
-        elif sys.argv[1] == 'preview' and len(sys.argv) > 2:
-            explorer.preview_table(sys.argv[2])
-        
-        elif sys.argv[1] == 'samples':
-            explorer.show_sample_queries()
-        
-        else:
-            print("Usage:")
-            print("  python query_tool.py                    # Interactive mode")
-            print("  python query_tool.py tables             # Show tables")
-            print("  python query_tool.py schema <table>     # Show schema")
-            print("  python query_tool.py preview <table>    # Preview data")
-            print("  python query_tool.py samples            # Sample queries")
-        
-        explorer.conn.close()
+        with DatabaseExplorer() as explorer:
+            if sys.argv[1] == 'tables':
+                explorer.show_tables()
+            
+            elif sys.argv[1] == 'schema' and len(sys.argv) > 2:
+                explorer.show_table_schema(sys.argv[2])
+            
+            elif sys.argv[1] == 'preview' and len(sys.argv) > 2:
+                explorer.preview_table(sys.argv[2])
+            
+            elif sys.argv[1] == 'samples':
+                explorer.show_sample_queries()
+            
+            else:
+                print("Usage:")
+                print("  python query_tool.py                    # Interactive mode")
+                print("  python query_tool.py tables             # Show tables")
+                print("  python query_tool.py schema <table>     # Show schema")
+                print("  python query_tool.py preview <table>    # Preview data")
+                print("  python query_tool.py samples            # Sample queries")
     
     else:
         # Interactive mode
-        explorer = DatabaseExplorer()
-        explorer.interactive_mode()
+        with DatabaseExplorer() as explorer:
+            explorer.interactive_mode()
 
 if __name__ == "__main__":
     main()

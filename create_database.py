@@ -1,270 +1,188 @@
 #!/usr/bin/env python3
 """
-Produced by Claude. Create SQLite database for SMDAMAGE CSV data
-Converts all CSV files in the Data directory to organized database tables
+Create SQLite database for SMDAMAGE CSV data. Produced by Claude with JFR's guidance.
 """
-
-import sqlite3
 import csv
 import os
 import sys
 
-# Import functions for bidders data
 sys.path.append("./SMDAMAGE revenue neutral")
-from defaults_and_utilities import getEmitters, getRemovers, getUnits
+from database_interface import database_exists, do_insert, do_query, show_database_info
 
-# Database file name
-DB_NAME = "smdamage_data.db"
-DATA_DIR = "Data"
+DATA_DIR = "Data" # Holds all the CSV files with bidder and warming factor data. Make sure this directory exists and contains the necessary CSV files before running this script.
+
+# Simple bidders can be loaded directly with add_bidder
+SIMPLE_BIDDERS = [
+	{'bidder_name': 'Agriculture', 'csv_filename': 'Agriculture_bids.csv', 'bidder_class': 'Remover', 'units': 'mtC', 'contract_years': 1, 'hector_name': 'ffi_emissions', 'description': 'Agricultural carbon mitigation'},
+	{'bidder_name': 'Seaweed', 'csv_filename': 'Seaweed_bids.csv', 'bidder_class': 'Remover', 'units': 'mtC', 'contract_years': 1, 'hector_name': 'ffi_emissions', 'description': 'Seaweed carbon removal'},
+	{'bidder_name': 'Carbon', 'csv_filename': 'MtC_bid_steps.csv', 'bidder_class': 'Emitter', 'units': 'mtC', 'contract_years': 1, 'hector_name': 'ffi_emissions', 'description': 'Carbon emissions'},
+	{'bidder_name': 'CH4', 'csv_filename': 'CH4_bid_steps.csv', 'bidder_class': 'Emitter', 'units': 'mt', 'contract_years': 1, 'hector_name': 'CH4_emissions', 'description': 'Methane emissions'},
+	{'bidder_name': 'N2O', 'csv_filename': 'N2O_bid_steps.csv', 'bidder_class': 'Emitter', 'units': 'mt', 'contract_years': 1, 'hector_name': 'N2O_emissions', 'description': 'Nitrous oxide emissions'}
+]
+
+# Multi-column CSV files. Easy to make but require special handling to split into individual bidders with their own price and quantity columns.
+MULTI_COLUMN_BIDDERS = {'chemicals': {
+        'csv_filename': 'C2F6_CF4_HFC125_HFC134a_HFC143a_SF6_bidsteps.csv',
+        'shared_quantity_col': None,  # Each bidder has its own quantity column
+        'bidders': [
+            {'name': 'C2F6', 'price_col': 0, 'qty_col': 1, 'bidder_class': 'Emitter', 'units': 'kt', 'contract_years': 1, 'hector_name': 'C2F6_emissions'},
+            {'name': 'CF4', 'price_col': 2, 'qty_col': 3, 'bidder_class': 'Emitter', 'units': 'kt', 'contract_years': 1, 'hector_name': 'CF4_emissions'},
+            {'name': 'HFC125', 'price_col': 4, 'qty_col': 5, 'bidder_class': 'Emitter', 'units': 'kt', 'contract_years': 1, 'hector_name': 'HFC125_emissions'},
+            {'name': 'HFC134a', 'price_col': 6, 'qty_col': 7, 'bidder_class': 'Emitter', 'units': 'kt', 'contract_years': 1, 'hector_name': 'HFC134a_emissions'},
+            {'name': 'HFC143a', 'price_col': 8, 'qty_col': 9, 'bidder_class': 'Emitter', 'units': 'kt', 'contract_years': 1, 'hector_name': 'HFC143a_emissions'},
+            {'name': 'SF6', 'price_col': 10, 'qty_col': 11, 'bidder_class': 'Emitter', 'units': 'kt', 'contract_years': 1, 'hector_name': 'SF6_emissions'}
+        ]
+    },
+    'forestry': {
+        'csv_filename': 'Forestry_bid_steps.csv',
+        'shared_quantity_col': 0,  # All forestry bidders share quantity from column 0
+        'bidders': [
+            {'name': 'Loblolly_pine_150', 'price_col': 1, 'qty_col': None, 'bidder_class': 'Remover', 'units': 'mhectares', 'contract_years': 150, 'hector_name': 'ffi_emissions'},
+            {'name': 'Ponderosa_pine_150', 'price_col': 2, 'qty_col': None, 'bidder_class': 'Remover', 'units': 'mhectares', 'contract_years': 150, 'hector_name': 'ffi_emissions'},
+            {'name': 'Black_walnut_150', 'price_col': 3, 'qty_col': None, 'bidder_class': 'Remover', 'units': 'mhectares', 'contract_years': 150, 'hector_name': 'ffi_emissions'},
+            {'name': 'Loblolly_pine_10', 'price_col': 4, 'qty_col': None, 'bidder_class': 'Remover', 'units': 'mhectares', 'contract_years': 10, 'hector_name': 'ffi_emissions'},
+            {'name': 'Ponderosa_pine_10', 'price_col': 5, 'qty_col': None, 'bidder_class': 'Remover', 'units': 'mhectares', 'contract_years': 10, 'hector_name': 'ffi_emissions'},
+            {'name': 'Black_walnut_10', 'price_col': 6, 'qty_col': None, 'bidder_class': 'Remover', 'units': 'mhectares', 'contract_years': 10, 'hector_name': 'ffi_emissions'},
+            {'name': 'Loblolly_pine_24', 'price_col': 7, 'qty_col': None, 'bidder_class': 'Remover', 'units': 'mhectares', 'contract_years': 24, 'hector_name': 'ffi_emissions'},
+            {'name': 'Ponderosa_pine_103', 'price_col': 8, 'qty_col': None, 'bidder_class': 'Remover', 'units': 'mhectares', 'contract_years': 103, 'hector_name': 'ffi_emissions'},
+            {'name': 'Black_walnut_55', 'price_col': 9, 'qty_col': None, 'bidder_class': 'Remover', 'units': 'mhectares', 'contract_years': 55, 'hector_name': 'ffi_emissions'}
+        ]
+    }
+}
+
+# Other data file configurations
+CHEMICAL_PULSES_FILE = 'Calibrated_pulses_by_chemical_2025.txt'
+FORESTRY_SEQUESTRATION_FILE = 'Forestry_sequestration.csv'
 
 def create_database():
     """Create the SQLite database and populate with CSV data"""
+    # Check if database already exists
+    if database_exists():
+        print(f"❌ Database already exists. Delete it first or use a different name.")
+        sys.exit(1)
     
-    # Connect to database (creates if doesn't exist)
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
+    # Warming data
+    data_columns = ', '.join([f'year_{i:03d} REAL' for i in range(1, 297)]) # Warming factors table, 296 data values (year_001 to year_296).
+    do_query(f'''CREATE TABLE IF NOT EXISTS warming_factors (id INTEGER PRIMARY KEY AUTOINCREMENT, hector_name TEXT, emission_factor REAL, hector_units TEXT, {data_columns})''')
+    do_query('CREATE INDEX IF NOT EXISTS idx_warming_factors_hector_name ON warming_factors(hector_name)')
+    load_chemical_pulses() # originally from Hector.
     
-    # Create tables
-    create_tables(cursor)
+	# Bidders
+    do_query('''CREATE TABLE IF NOT EXISTS bidders (id INTEGER PRIMARY KEY AUTOINCREMENT, bidder TEXT UNIQUE, class TEXT, units TEXT, contract_years INTEGER, hector_name TEXT, description TEXT)''')
+    do_query('CREATE INDEX IF NOT EXISTS idx_bidders_name ON bidders(bidder)')
+    do_query('CREATE INDEX IF NOT EXISTS idx_bidders_class ON bidders(class)')
+    do_query('CREATE INDEX IF NOT EXISTS idx_bidders_contract_years ON bidders(contract_years)')
+    do_query('CREATE INDEX IF NOT EXISTS idx_bidders_hector_name ON bidders(hector_name)')    
     
-    # Load CSV data into tables
-    load_csv_data(cursor, conn)
+	# Bids
+    do_query('''CREATE TABLE IF NOT EXISTS bids (id INTEGER PRIMARY KEY AUTOINCREMENT, bidder TEXT, price_per_unit REAL, quantity_units REAL, FOREIGN KEY (bidder) REFERENCES bidders(bidder))''')
+    do_query('CREATE INDEX IF NOT EXISTS idx_bids_bidder ON bids(bidder)')
+    do_query('CREATE INDEX IF NOT EXISTS idx_bids_price ON bids(price_per_unit)')
     
-    # Create indices for better performance
-    create_indices(cursor)
-    
-    conn.commit()
-    conn.close()
-    
-    print(f"Database '{DB_NAME}' created successfully!")
+    load_simple_bidders()
+    load_multi_column_bidders('chemicals')
+    load_multi_column_bidders('forestry')
 
-def create_tables(cursor):
-    """Create all database tables"""
-    
-    # Unified Bids table - replaces all individual *_bids tables
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS bids (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            bidder TEXT,
-            price_per_unit REAL,
-            quantity_units REAL,
-            FOREIGN KEY (bidder) REFERENCES bidders(bidder)
-        )
-    ''')
-    
-    # Forestry removal table - normalized structure
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS forestry_removal (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            bidder TEXT NOT NULL,
-            year INTEGER NOT NULL,
-            tons_per_hectare_per_year REAL NOT NULL
-        )
-    ''')
-    
-    # Warming factors table (formerly chemical_pulses) - with individual columns for each data value
-    # Create columns for 296 data values (year_001 to year_296)
-    data_columns = ', '.join([f'year_{i:03d} REAL' for i in range(1, 297)])
-    cursor.execute(f'''
-        CREATE TABLE IF NOT EXISTS warming_factors (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            hector_name TEXT,
-            emission_factor REAL,
-            hector_units TEXT,
-            {data_columns}
-        )
-    ''')
-    
-    # Bidders table - contains all emitters and removers with their properties
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS bidders (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            bidder TEXT UNIQUE,
-            class TEXT,
-            units TEXT,
-            contract_years INTEGER,
-            hector_name TEXT,
-            description TEXT
-        )
-    ''')
+	# Forestry carbon removal.
+    do_query('''CREATE TABLE IF NOT EXISTS forestry_removal (id INTEGER PRIMARY KEY AUTOINCREMENT, bidder TEXT NOT NULL, year INTEGER NOT NULL, tons_per_hectare_per_year REAL NOT NULL)''')
+    do_query('CREATE INDEX IF NOT EXISTS idx_forestry_seq_bidder ON forestry_removal(bidder)')
+    do_query('CREATE INDEX IF NOT EXISTS idx_forestry_seq_year ON forestry_removal(year)')
+    do_query('CREATE INDEX IF NOT EXISTS idx_forestry_seq_bidder_year ON forestry_removal(bidder, year)')
+    load_forestry_removal()
 
-def load_csv_data(cursor, conn):
-    """Load data from CSV files into unified bids table"""
+	# Create indexes for faster queries
+    print(f"Database created and populated with data.")
     
-    # Load Agriculture bids
-    try:
-        with open(os.path.join(DATA_DIR, 'Agriculture_bids.csv'), 'r') as f:
-            reader = csv.reader(f)
-            next(reader)  # Skip header
-            for row in reader:
-                cursor.execute('''
-                    INSERT INTO bids (bidder, price_per_unit, quantity_units) 
-                    VALUES (?, ?, ?)
-                ''', ('Agriculture', float(row[0]), float(row[1])))
-        print("✓ Loaded Agriculture_bids.csv")
-    except FileNotFoundError:
-        print("⚠ Agriculture_bids.csv not found")
+def add_bidder_and_bids(bidder_name, csv_filename, bidder_class='Emitter', units='mtC', contract_years=1, hector_name='ffi_emissions', description=''):
+    """Add bidder data from CSV file to database
     
-    # Load Carbon bids
-    try:
-        with open(os.path.join(DATA_DIR, 'MtC_bid_steps.csv'), 'r') as f:
-            reader = csv.reader(f)
-            next(reader)  # Skip header
-            for row in reader:
-                cursor.execute('''
-                    INSERT INTO bids (bidder, price_per_unit, quantity_units) 
-                    VALUES (?, ?, ?)
-                ''', ('Carbon', float(row[0]), float(row[1])))
-        print("✓ Loaded MtC_bid_steps.csv")
-    except FileNotFoundError:
-        print("⚠ MtC_bid_steps.csv not found")
+    Args:
+        bidder_name: Name of the bidder to add.
+        csv_filename: Path to CSV file with bid data (price, quantity format).
+        bidder_class: Bidder class - 'Emitter' or 'Remover' (default: 'Emitter').
+        units: Units for the bidder (default: 'mtC').
+        contract_years: Contract duration in years (default: 1).
+        hector_name: Associated hector name (default: 'ffi_emissions').
+        description: Description of the bidder (default: '').
+    """
+    if not os.path.exists(csv_filename): raise FileNotFoundError(f"CSV file '{csv_filename}' not found.")
     
-    # Load Seaweed bids
-    try:
-        with open(os.path.join(DATA_DIR, 'Seaweed_bids.csv'), 'r') as f:
-            reader = csv.reader(f)
-            next(reader)  # Skip header
-            for row in reader:
-                cursor.execute('''
-                    INSERT INTO bids (bidder, price_per_unit, quantity_units) 
-                    VALUES (?, ?, ?)
-                ''', ('Seaweed', float(row[0]), float(row[1])))
-        print("✓ Loaded Seaweed_bids.csv")
-    except FileNotFoundError:
-        print("⚠ Seaweed_bids.csv not found")
-    
-    # Load Chemical bids (decomposed into individual chemical bidders)
-    try:
-        with open(os.path.join(DATA_DIR, 'C2F6_CF4_HFC125_HFC134a_HFC143a_SF6_bidsteps.csv'), 'r') as f:
-            reader = csv.reader(f)
-            next(reader)  # Skip header
-            
-            # Chemical names and their column positions (price, quantity pairs)
-            chemicals_info = [
-                ('C2F6', 0, 1),
-                ('CF4', 2, 3),
-                ('HFC125', 4, 5),
-                ('HFC134a', 6, 7),
-                ('HFC143a', 8, 9),
-                ('SF6', 10, 11)
-            ]
-            
-            for row in reader:
-                for chemical_name, price_col, qty_col in chemicals_info:
-                    cursor.execute('''
-                        INSERT INTO bids (bidder, price_per_unit, quantity_units) 
-                        VALUES (?, ?, ?)
-                    ''', (chemical_name, float(row[price_col]), float(row[qty_col])))
+    do_insert("INSERT INTO bidders (bidder, class, units, contract_years, hector_name, description) VALUES (?, ?, ?, ?, ?, ?)", 
+        (bidder_name, bidder_class, units, contract_years, hector_name, description))
+
+    # Add the bids
+    with open(csv_filename, 'r') as file:
+        csv_reader = csv.reader(file)
+        header = next(csv_reader)  # Skip header row
         
-        print("✓ Loaded C2F6_CF4_HFC125_HFC134a_HFC143a_SF6_bidsteps.csv (decomposed)")
-    except FileNotFoundError:
-        print("⚠ C2F6_CF4_HFC125_HFC134a_HFC143a_SF6_bidsteps.csv not found")
+        bid_count = 0
+        for row in csv_reader:
+            if len(row) >= 2:
+                price_per_unit = float(row[0])
+                quantity_units = float(row[1])
+                do_insert("INSERT INTO bids (bidder, price_per_unit, quantity_units) VALUES (?, ?, ?)", (bidder_name, price_per_unit, quantity_units))
+                bid_count += 1
+        print(f"Inserted {bid_count} bid records for {bidder_name}")
+
+def load_simple_bidders():
+    """Load simple bidders (agriculture, seaweed, carbon, CH4, N2O) using add_bidder function"""
+    for bidder_config in SIMPLE_BIDDERS:
+        try: add_bidder_and_bids (bidder_name=bidder_config['bidder_name'],
+                csv_filename=os.path.join(DATA_DIR, bidder_config['csv_filename']),
+                bidder_class=bidder_config['bidder_class'],
+                units=bidder_config['units'],
+                contract_years=bidder_config['contract_years'],
+                hector_name=bidder_config['hector_name'],
+                description=bidder_config['description'])
+        except FileNotFoundError: print(f"⚠ {bidder_config['csv_filename']} not found")
+        except Exception as e: print(f"⚠ Error loading {bidder_config['bidder_name']} bids: {e}")
+
+def load_multi_column_bidders(config_key):
+    """Load bidders from multi-column CSV files using configuration"""
+    config = MULTI_COLUMN_BIDDERS[config_key]
+    csv_filename = config['csv_filename']
+    shared_quantity_col = config['shared_quantity_col']
+    bidders = config['bidders']
     
-    # Load CH4 bids
-    try:
-        with open(os.path.join(DATA_DIR, 'CH4_bid_steps.csv'), 'r') as f:
+    try: # First read the multi-column CSV file
+        with open(os.path.join(DATA_DIR, csv_filename), 'r') as f:
             reader = csv.reader(f)
-            next(reader)  # Skip header
-            for row in reader:
-                cursor.execute('''
-                    INSERT INTO bids (bidder, price_per_unit, quantity_units) 
-                    VALUES (?, ?, ?)
-                ''', ('CH4', float(row[0]), float(row[1])))
-        print("✓ Loaded CH4_bid_steps.csv")
-    except FileNotFoundError:
-        print("⚠ CH4_bid_steps.csv not found")
-    
-    # Load N2O bids
-    try:
-        with open(os.path.join(DATA_DIR, 'N2O_bid_steps.csv'), 'r') as f:
-            reader = csv.reader(f)
-            next(reader)  # Skip header
-            for row in reader:
-                cursor.execute('''
-                    INSERT INTO bids (bidder, price_per_unit, quantity_units) 
-                    VALUES (?, ?, ?)
-                ''', ('N2O', float(row[0]), float(row[1])))
-        print("✓ Loaded N2O_bid_steps.csv")
-    except FileNotFoundError:
-        print("⚠ N2O_bid_steps.csv not found")
-    
-    # Load Forestry bids - create separate bid entries for each tree type/contract combination
-    try:
-        with open(os.path.join(DATA_DIR, 'Forestry_bid_steps.csv'), 'r') as f:
-            reader = csv.reader(f)
-            next(reader)  # Skip header
-            for row in reader:
-                # Extract values for each tree type and contract duration
-                plantable_mhectares = float(row[0])
-                loblolly_150 = float(row[1])
-                ponderosa_150 = float(row[2])
-                black_walnut_150 = float(row[3])
-                loblolly_10 = float(row[4])
-                ponderosa_10 = float(row[5])
-                black_walnut_10 = float(row[6])
-                loblolly_24 = float(row[7])
-                ponderosa_103 = float(row[8])
-                black_walnut_55 = float(row[9])
+            header = next(reader)  # Skip header
+            rows = list(reader)  # Read all data rows
+        
+        for bidder in bidders: # Process each bidder in the configuration
+            bidder_data = []
+            for row in rows:
+                price_col = bidder['price_col']
+                qty_col = bidder['qty_col'] if bidder['qty_col'] is not None else shared_quantity_col
                 
-                # Create bid entries for each forestry option
-                forestry_bids = [
-                    ('Loblolly_pine_150', loblolly_150),
-                    ('Ponderosa_pine_150', ponderosa_150),
-                    ('Black_walnut_150', black_walnut_150),
-                    ('Loblolly_pine_10', loblolly_10),
-                    ('Ponderosa_pine_10', ponderosa_10),
-                    ('Black_walnut_10', black_walnut_10),
-                    ('Loblolly_pine_24', loblolly_24),
-                    ('Ponderosa_pine_103', ponderosa_103),
-                    ('Black_walnut_55', black_walnut_55)
-                ]
-                
-                for bidder_name, price_per_hectare in forestry_bids:
-                    cursor.execute('''
-                        INSERT INTO bids (bidder, price_per_unit, quantity_units) 
-                        VALUES (?, ?, ?)
-                    ''', (bidder_name, price_per_hectare, plantable_mhectares))
-                    
-        print("✓ Loaded Forestry_bid_steps.csv (decomposed into individual bidders)")
-    except FileNotFoundError:
-        print("⚠ Forestry_bid_steps.csv not found")
-    
-    # Load Forestry removal (unchanged)
-    try:
-        with open(os.path.join(DATA_DIR, 'Forestry_sequestration.csv'), 'r') as f:
-            reader = csv.reader(f)
-            next(reader)  # Skip header
+                if len(row) > max(price_col, qty_col):
+                    price = float(row[price_col])
+                    quantity = float(row[qty_col])
+                    bidder_data.append([price, quantity])
             
-            # Column mapping: CSV column index -> (bidder_name, description)
-            column_mappings = [
-                (1, 'Loblolly_pine_150', 'Loblolly pine 150yr'),
-                (2, 'Ponderosa_pine_150', 'Ponderosa pine 150yr'), 
-                (3, 'Black_walnut_150', 'Black walnut 150yr'),
-                (4, 'Loblolly_pine_10', 'Loblolly pine 10yr'),
-                (5, 'Ponderosa_pine_10', 'Ponderosa pine 10yr'),
-                (6, 'Black_walnut_10', 'Black walnut 10yr'),
-                (7, 'Loblolly_pine_24', 'Loblolly pine 24yr'),
-                (8, 'Ponderosa_pine_103', 'Ponderosa pine 103yr'),
-                (9, 'Black_walnut_55', 'Black walnut 55yr')
-            ]
-            
-            for row in reader:
-                year = int(row[0])
-                # Transform wide format to long format - one row per bidder per year
-                for col_idx, bidder_name, description in column_mappings:
-                    tons_per_hectare = float(row[col_idx])
-                    cursor.execute('''
-                        INSERT INTO forestry_removal 
-                        (bidder, year, tons_per_hectare_per_year) 
-                        VALUES (?, ?, ?)
-                    ''', (bidder_name, year, tons_per_hectare))
-        print("✓ Loaded Forestry_sequestration.csv (normalized to long format into forestry_removal table)")
-    except FileNotFoundError:
-        print("⚠ Forestry_sequestration.csv not found")
-    
-    # Load Chemical pulses (unchanged) - split data values into individual columns
+            if bidder_data: # Create temporary CSV file for this bidder
+                temp_csv_path = os.path.join(DATA_DIR, f"temp_{bidder['name']}_bids.csv")
+                with open(temp_csv_path, 'w', newline='') as temp_f:
+                    writer = csv.writer(temp_f)
+                    writer.writerow(['price_per_unit', 'quantity_units'])  # Header
+                    writer.writerows(bidder_data)
+
+                try: add_bidder_and_bids(bidder_name=bidder['name'], csv_filename=temp_csv_path,
+                        bidder_class=bidder['bidder_class'], units=bidder['units'],
+                        contract_years=bidder['contract_years'], hector_name=bidder['hector_name'],
+                        description=f"{bidder['name'].replace('_', ' ')} {bidder['bidder_class'].lower()}")
+                finally: # Clean up temporary file
+                    if os.path.exists(temp_csv_path): os.remove(temp_csv_path)
+        
+        print(f"Loaded {csv_filename} decomposed into individual bidders.")
+    except FileNotFoundError: print(f"⚠ {csv_filename} not found")
+    except Exception as e: print(f"⚠ Error loading {config_key} bids: {e}")
+
+def load_chemical_pulses():
+    """Load chemical pulses into warming factors table"""
     try:
-        with open(os.path.join(DATA_DIR, 'Calibrated_pulses_by_chemical_2025.txt'), 'r') as f:
+        with open(os.path.join(DATA_DIR, CHEMICAL_PULSES_FILE), 'r') as f:
             for line in f:
                 if line.strip():  # Skip empty lines
                     parts = line.strip().split(',')
@@ -273,144 +191,49 @@ def load_csv_data(cursor, conn):
                         emission_factor = float(parts[1])
                         units = parts[2]
                         data_values = [float(val) for val in parts[3:]]  # Convert to individual float values
+                        while len(data_values) < 296: data_values.append(0.0) # Pad with zeros if we have fewer than 296 values
                         
-                        # Pad with zeros if we have fewer than 296 values
-                        while len(data_values) < 296:
-                            data_values.append(0.0)
-                        
-                        # Create column names and values for insertion
                         year_columns = ', '.join([f'year_{i:03d}' for i in range(1, 297)])
                         placeholders = ', '.join(['?' for _ in range(296)])
-                        
-                        cursor.execute(f'''
-                            INSERT INTO warming_factors 
-                            (hector_name, emission_factor, hector_units, {year_columns}) 
-                            VALUES (?, ?, ?, {placeholders})
-                        ''', (chemical_name, emission_factor, units, *data_values))
-        print("✓ Loaded Calibrated_pulses_by_chemical_2025.txt (decomposed into individual columns)")
+                        do_insert(f'''INSERT INTO warming_factors (hector_name, emission_factor, hector_units, {year_columns}) VALUES (?, ?, ?, {placeholders})''', (chemical_name, emission_factor, units, *data_values))
+        print(f"Loaded {CHEMICAL_PULSES_FILE} (decomposed into individual columns)")
     except FileNotFoundError:
-        print("⚠ Calibrated_pulses_by_chemical_2025.txt not found")
+        print(f"⚠ {CHEMICAL_PULSES_FILE} not found")
 
-    # Load Bidders data from defaults_and_utilities functions (unchanged)
+def load_forestry_removal():
+    """Load forestry removal data from Forestry_sequestration.csv"""
     try:
-        units_dict = getUnits()
+        # Build column mappings from existing forestry configuration
+        forestry_bidders = MULTI_COLUMN_BIDDERS['forestry']['bidders']
+        column_mappings = []
+        for bidder in forestry_bidders:
+            # Map price_col to the sequestration data column (same column index)
+            col_idx = bidder['price_col']
+            bidder_name = bidder['name']
+            description = f"{bidder_name.replace('_', ' ')} {bidder['contract_years']}yr"
+            column_mappings.append((col_idx, bidder_name, description))
         
-        def get_hector_name(bidder_name, is_emitter):
-            """Map bidder names to Hector chemical names"""
-            # Mapping based on hector_interface.py lines 95-98
-            hector_mapping = {
-                # Emitters - match to specific chemical emissions
-                'Carbon': 'ffi_emissions',
-                'CH4': 'CH4_emissions',
-                'N2O': 'N2O_emissions',
-                'C2F6': 'C2F6_emissions',
-                'CF4': 'CF4_emissions', 
-                'HFC125': 'HFC125_emissions',
-                'HFC134a': 'HFC134a_emissions',
-                'HFC143a': 'HFC143a_emissions',
-                'SF6': 'SF6_emissions'
-            }
+        with open(os.path.join(DATA_DIR, FORESTRY_SEQUESTRATION_FILE), 'r') as f:
+            reader = csv.reader(f)
+            next(reader)  # Skip header
             
-            if bidder_name in hector_mapping:
-                return hector_mapping[bidder_name]
-            elif not is_emitter:
-                # All removers (agriculture, seaweed, forestry) map to ffi_emissions
-                return 'ffi_emissions'
-            else:
-                return None  # Unknown emitter
-        
-        # Add all emitters (all have 1-year contracts)
-        for emitter in getEmitters():
-            units = units_dict.get(emitter, 'unknown')
-            hector_name = get_hector_name(emitter, True)
-            cursor.execute('''
-                INSERT OR IGNORE INTO bidders (bidder, class, units, contract_years, hector_name, description) 
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (emitter, 'Emitter', units, 1, hector_name, ''))
-        
-        # Add all removers with appropriate contract years
-        for remover in getRemovers():
-            units = units_dict.get(remover, 'unknown')
-            hector_name = get_hector_name(remover, False)
-            
-            # Extract contract years from name for forestry items
-            contract_years = 1  # Default for Agriculture and Seaweed
-            if remover not in ['Agriculture', 'Seaweed']:
-                # Extract number from names like "Loblolly_pine_150", "Black_walnut_55", etc.
-                parts = remover.split('_')
-                for part in reversed(parts):  # Check from end to find the number
-                    if part.isdigit():
-                        contract_years = int(part)  
-                        break
-            
-            cursor.execute('''
-                INSERT OR IGNORE INTO bidders (bidder, class, units, contract_years, hector_name, description) 
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (remover, 'Remover', units, contract_years, hector_name, ''))
-        
-        print("✓ Loaded bidders data from defaults_and_utilities functions")
-    except Exception as e:
-        print(f"⚠ Error loading bidders data: {e}")
-
-def create_indices(cursor):
-    """Create database indices for better performance"""
+            for row in reader:
+                year = int(row[0])
+                # Transform wide format to long format - one row per bidder per year
+                for col_idx, bidder_name, description in column_mappings:
+                    tons_per_hectare = float(row[col_idx])
+                    do_insert('''INSERT INTO forestry_removal (bidder, year, tons_per_hectare_per_year) VALUES (?, ?, ?)''', (bidder_name, year, tons_per_hectare))
+        print(f"Loaded {FORESTRY_SEQUESTRATION_FILE} (normalized to long format into forestry_removal table)")
+    except FileNotFoundError:
+        print(f"⚠ {FORESTRY_SEQUESTRATION_FILE} not found")
     
-    # Create indices on frequently queried columns
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_bids_bidder ON bids(bidder)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_bids_price ON bids(price_per_unit)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_warming_factors_hector_name ON warming_factors(hector_name)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_forestry_seq_bidder ON forestry_removal(bidder)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_forestry_seq_year ON forestry_removal(year)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_forestry_seq_bidder_year ON forestry_removal(bidder, year)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_bidders_name ON bidders(bidder)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_bidders_class ON bidders(class)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_bidders_contract_years ON bidders(contract_years)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_bidders_hector_name ON bidders(hector_name)')
-    
-    print("✓ Created database indices")
-
-def show_database_info():
-    """Display information about the created database"""
-    
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    
-    # Get list of tables
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-    tables = cursor.fetchall()
-    
-    print(f"\n📊 Database '{DB_NAME}' contains {len(tables)} tables:")
-    
-    for table in tables:
-        table_name = table[0]
-        cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
-        count = cursor.fetchone()[0]
-        print(f"  • {table_name}: {count} records")
-    
-    conn.close()
-
 if __name__ == "__main__":
-    print("🗄️  Creating SMDAMAGE SQLite Database")
-    print("=" * 40)
-    
-    # Change to the script directory
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(script_dir)
+    os.chdir(script_dir) # Change to the script directory
     
-    # Check if Data directory exists
     if not os.path.exists(DATA_DIR):
-        print(f"❌ Error: '{DATA_DIR}' directory not found!")
-        print(f"   Make sure this script is in the same directory as the '{DATA_DIR}' folder.")
+        print(f"❌ Error: '{DATA_DIR}' directory not found. Make sure this script is in the same directory as the '{DATA_DIR}' folder.")
         sys.exit(1)
     
-    # Create the database
     create_database()
-    
-    # Show database information
     show_database_info()
-    
-    print("\n✅ Database creation complete!")
-    print(f"\n💡 You can now query the database using:")
-    print(f"   conn = sqlite3.connect('{DB_NAME}')")
-    print("   cursor = conn.cursor()")
-    print("   cursor.execute('SELECT * FROM agriculture_bids LIMIT 5')")

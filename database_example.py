@@ -32,11 +32,11 @@ def read_bids_from_database(scenario):
     PeriodsPerYear = 1.0  # Mock value
 
     # Get database instance
-    db = db_interface.get_db()
+    # db = db_interface.get_db()
 
     # 2.1 Agriculture - Using database instead of CSV
     print("Loading Agriculture bids from database...")
-    agriculture_bids = db.get_bids('Agriculture')  # Returns list of (price, quantity) tuples
+    agriculture_bids = db_interface.get_bids('Agriculture')  # Returns list of (price, quantity) tuples
     
     for t in AllBidPeriods:
         PT_set.add(('Agriculture', t))
@@ -47,7 +47,7 @@ def read_bids_from_database(scenario):
 
     # 2.2 Carbon - Using database instead of CSV
     print("Loading Carbon bids from database...")
-    carbon_bids = db.get_bids('Carbon')  # Returns list of (price, quantity) tuples
+    carbon_bids = db_interface.get_bids('Carbon')  # Returns list of (price, quantity) tuples
     
     for t in AllBidPeriods:
         PT_set.add(('Carbon', t))
@@ -61,7 +61,7 @@ def read_bids_from_database(scenario):
     
     for chem_name in chemicals:
         print(f"Loading {chem_name} bids from database...")
-        chem_bids = db.get_bids(chem_name)  # Returns list of (price, quantity) tuples
+        chem_bids = db_interface.get_bids(chem_name)  # Returns list of (price, quantity) tuples
         
         for t in AllBidPeriods:
             PT_set.add((chem_name, t))
@@ -83,14 +83,14 @@ def get_pulse_data_from_database():
     """
     print("Loading pulse data from database...")
     
-    db = db_interface.get_db()
+    # db_interface = db_interface_interface.get_db_interface()
     
     # Get all available hector names
-    hector_names = db.get_hector_names()
+    hector_names = db_interface.get_hector_names()
     print(f"Available hector names in warming factor data: {hector_names}")
     
     # Example: Get warming factor data for a specific hector name
-    ffi_data = db.get_warming_factors('ffi_emissions')
+    ffi_data = db_interface.get_warming_factors('ffi_emissions')
     if ffi_data:
         print(f"FFI emissions factor: {ffi_data['emission_factor']} {ffi_data['hector_units']}")
         print(f"First 10 data points: {ffi_data['data_values'][:10]}")
@@ -98,7 +98,7 @@ def get_pulse_data_from_database():
     # Build pulse dictionary similar to original code
     Pulse = {}
     for hector_name in hector_names:
-        pulse_data = db.get_warming_factors(hector_name)
+        pulse_data = db_interface.get_warming_factors(hector_name)
         if pulse_data:
             # Extract the chemical name without '_emissions' suffix if present
             clean_name = hector_name.replace('_emissions', '')
@@ -142,20 +142,20 @@ def get_forestry_bids_from_database():
     """
     print("Loading forestry bid data from database...")
     
-    db = db_interface.get_db()
+    # db_interface = db_interface_interface.get_db_interface()
     
     # Get bids for different contract durations
     forestry_bids_150 = []  # Get all 150-year forestry contracts
     for bidder in ['Black_walnut_150', 'Loblolly_pine_150', 'Ponderosa_pine_150']:
-        forestry_bids_150.extend(db.get_bids(bidder))
+        forestry_bids_150.extend(db_interface.get_bids(bidder))
     
     forestry_bids_10 = []  # Get all 10-year forestry contracts  
     for bidder in ['Black_walnut_10', 'Loblolly_pine_10', 'Ponderosa_pine_10']:
-        forestry_bids_10.extend(db.get_bids(bidder))
+        forestry_bids_10.extend(db_interface.get_bids(bidder))
     
-    forestry_bids_24 = db.get_bids('Loblolly_pine_24')    # 24-year contracts (loblolly only)
-    forestry_bids_103 = db.get_bids('Ponderosa_pine_103')  # 103-year contracts (ponderosa only)
-    forestry_bids_55 = db.get_bids('Black_walnut_55')    # 55-year contracts (black walnut only)
+    forestry_bids_24 = db_interface.get_bids('Loblolly_pine_24')    # 24-year contracts (loblolly only)
+    forestry_bids_103 = db_interface.get_bids('Ponderosa_pine_103')  # 103-year contracts (ponderosa only)
+    forestry_bids_55 = db_interface.get_bids('Black_walnut_55')    # 55-year contracts (black walnut only)
     
     print(f"🌲 150-year contracts: {len(forestry_bids_150)} bids (all tree types)")
     print(f"🌲 10-year contracts: {len(forestry_bids_10)} bids (all tree types)")
@@ -182,81 +182,35 @@ def get_forestry_bids_from_database():
 
 # Demonstration function
 def demonstrate_database_usage():
-    """Demonstrate how to use the database instead of CSV files"""
-    
-    print("🗄️  SMDAMAGE Database Usage Example")
-    print("=" * 50)
-    
-    try:
-        # Example scenario object (you would use your actual scenario)
-        class MockScenario:
-            def discount_rate(self, years):
-                return 1.0  # Simplified discount rate
-        
-        scenario = MockScenario()
-        
-        # Show database info
-        db = db_interface.get_db()
-        info = db.get_database_info()
-        print("📊 Database contains:")
-        for table, count in info.items():
-            if table != 'sqlite_sequence':  # Skip system table
-                print(f"  • {table}: {count} records")
-        
-        print("\n" + "="*50)
-        print("🔄 Usage Examples:")
-        print("="*50)
-        
-        # Example 1: Direct data access
-        print("\n1️⃣  Direct data access:")
-        ag_bids = db_interface.get_bids('Agriculture')
-        print(f"   Agriculture bids: {len(ag_bids)} entries")
-        print(f"   First bid: ${ag_bids[0][0]:.2f}/MgtonC, {ag_bids[0][1]:.1f} MgtonC")
-        
-        # Individual chemical access
-        print("   Individual chemical bids:")
-        c2f6_bids = db_interface.get_bids('C2F6')
-        print(f"   C2F6 bids: {len(c2f6_bids)} entries")
-        print(f"   First C2F6 bid: ${c2f6_bids[0][0]:.2f}/kt, {c2f6_bids[0][1]:.1f} kt/year")
-        
-        sf6_bids = db_interface.get_bids('SF6')
-        print(f"   SF6 bids: {len(sf6_bids)} entries")
-        print(f"   First SF6 bid: ${sf6_bids[0][0]:.2f}/kt, {sf6_bids[0][1]:.1f} kt/year")
-        
-        # Example 2: Warming factor data access
-        print("\n2️⃣  Warming factor data:")
-        hector_names = db_interface.get_all_hector_names()
-        print(f"   Available hector names: {len(hector_names)}")
-        
-        ffi = db_interface.get_warming_factor_data('ffi_emissions')
-        if ffi:
-            print(f"   FFI factor: {ffi['emission_factor']} {ffi['hector_units']}")
-        
-        # Example 3: Custom queries
-        print("\n3️⃣  Custom database queries:")
-        high_carbon_bids = db.query_custom(
-            "SELECT price_per_unit, quantity_units FROM bids WHERE bidder = 'Carbon' AND price_per_unit > 50 LIMIT 5"
-        )
-        print(f"   High-price carbon bids (>$50/ton): {len(high_carbon_bids)} found")
-        for price, qty in high_carbon_bids[:3]:
-            print(f"     ${price:.2f}/ton, {qty:.1f} Mtons")
-        
-        # Example 4: Forestry contract comparisons
-        print("\n4️⃣  Forestry contract data by duration:")
-        forestry_data = get_forestry_bids_from_database()
-        print("   ✓ Loaded all forestry contract duration tables")
-        
-        print("\n✅ Database integration working successfully!")
-        print("\n💡 Next steps:")
-        print("   1. Replace CSV reading code in your main SMDAMAGE script")
-        print("   2. Use database_interface.py functions instead of file I/O")
-        print("   3. All bidders now use the unified get_bids(bidder_name) function")
-        print("   4. Each forestry contract duration has its own table and function")
-        print("   5. Benefit from faster queries and better data organization")
-        
-    except Exception as e:
-        print(f"❌ Error: {e}")
-        print("Make sure the database has been created with create_database.py")
+	
+	db_interface.show_database_info()
+	ag_bids = db_interface.get_bids('Agriculture')
+	print(f"Agriculture bids: {len(ag_bids)} entries")
+	print(f"First bid: ${ag_bids[0][0]:.2f}/MgtonC, {ag_bids[0][1]:.1f} MgtonC")
+	
+	c2f6_bids = db_interface.get_bids('C2F6')
+	print(f"C2F6 bids: {len(c2f6_bids)} entries")
+	print(f"First C2F6 bid: ${c2f6_bids[0][0]:.2f}/kt, {c2f6_bids[0][1]:.1f} kt/year")
+	
+	hector_names = db_interface.get_hector_names()
+	print(f"Available hector names: {len(hector_names)}")
+	
+	ffi = db_interface.get_warming_factors('ffi_emissions')
+	print(f"FFI factor: {ffi['emission_factor']} {ffi['hector_units']}")
+	
+	print("Custom query:")
+	high_carbon_bids = db_interface.do_query("SELECT price_per_unit, quantity_units FROM bids WHERE bidder = 'Carbon' AND price_per_unit > 50 LIMIT 5")
+	print(f"High-price carbon bids (>$50/ton): {len(high_carbon_bids)} found")
+	for price, qty in high_carbon_bids[:3]: print(f"     ${price:.2f}/ton, {qty:.1f} Mtons")
+	
+	print("\n4️⃣  Forestry contract data by duration:")
+	forestry_data = get_forestry_bids_from_database()
+	print("   ✓ Loaded all forestry contract duration tables")
+	
+	print("\n💡 Next steps:")
+	print("   1. Replace CSV reading code in your main SMDAMAGE script")
+	print("   2. Use database_interface.py functions instead of file I/O")
+	print("   3. All bidders now use the unified get_bids(bidder_name) function")
 
 if __name__ == "__main__":
     demonstrate_database_usage()
