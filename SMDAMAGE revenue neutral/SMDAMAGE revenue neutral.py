@@ -18,11 +18,18 @@
 # ../data/Agriculture_bids.csv,
 # ../data/Seaweed_bids.csv.
 
+import sys
+import os
+# Add parent directory to Python path to find database_interface.py
+# sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+
+# from database_interface import get_bids
+import database_interface
 import defaults_and_utilities # Default parameters and utility functions
 # import database_interface # Read the SMDAMAGE database.
 import hector_interface # Hector pulse generation functions.
 # import matplotlib.pyplot as mplot # graphing.
-import os # file management.
+# import os # file management.
 import pickle # saving and retrieving solutions, especially the calibrated Wpt.
 import plotting_utils # Consolidated plotting functions
 from pulp import * #pulp.pulpTestAll() # to solve the linear programs.
@@ -87,8 +94,21 @@ def get_warming_effects(scenario): # Get warming effects in degrees Celsius in e
 			Wpt_dict[(p, float(t0))] = Pulse[p][1 + t0]*scaleCelsius/Pulse[p][0]
 	return Wpt_dict
 
+def load_bids(bidder, AllBidPeriods, PT_set, APT_set, Bapt, Uapt, StartYear, scenario, PeriodsPerYear):
+	"""""
+	Args:
+		bidder: Database record of the bidder, e.g., (3, 'Carbon', 'Emitter', 'mtC', 1, 'ffi_emissions', 'Carbon emissions')
+		AllBidPeriods (list): List of bid periods
+		PT_set (set): Set to store (pollutant, time) tuples
+		APT_set (set): Set to store (agent, pollutant, time) tuples
+		Bapt (dict): Dictionary for bid prices
+		Uapt (dict): Dictionary for upper bid quantities
+		StartYear (int): Starting year for calculations
+		scenario: Scenario object with discount_rate method
+		PeriodsPerYear (float): Number of periods per year
+	"""
+
 def read_bids(scenario):
-	# Parameters
 	AllBidPeriods = defaults_and_utilities.getBidPeriods()
 	StartYear = defaults_and_utilities.getStartYear()
 
@@ -96,117 +116,20 @@ def read_bids(scenario):
 	Uapt = {} # Upper bid quantity, kg, for agent a, pollutant p, time period t.
 	APT_set = set() # [(a, p, t),...]
 	PT_set = set()
-
-	# All bids in millions of dollars per million tons.
-	# 2.1 Agriculture. $US2022, Mtons C2. Based on Smith P., et ak, 2014: Agriculture, Forestry and Other Land Use (AFOLU). In: Climate Change 2014: Mitigation of Climate Change, Figure 11.17.
-	with open ('./data/Agriculture_bids.csv') as agfile: # Year, Tonnes/hectare/year Loblolly pine, Tonnes/hectare/year Ponderosa pine	Tonnes/hectare/year Black walnut
-		lines = [line.split(',') for line in agfile]
-	Bid_Q_Agriculture = [(float (line[0]), float (line[1])) for line in lines[1:]]
-	for t in AllBidPeriods:
-		PT_set.add(('Agriculture',t))
-		for bidstep, bid in enumerate(Bid_Q_Agriculture):
-			APT_set.add((bidstep,'Agriculture',t))
-			# Agriculture's bids should be negative.
-			# Bapt[bidstep,'Agriculture',t] = - bid[0]*scenario.discount_rate(t - StartYear) # M dollars/M tons
-			Bapt[bidstep,'Agriculture',t] = bid[0]*scenario.discount_rate(t - StartYear) # M dollars/M tons
-			Uapt[bidstep,'Agriculture',t] = bid[1]/float(hector_interface.getPeriodsPerYear()) # M tons per period.
-
-	# 2.2 Carbon. $/tonne, Marginal Mtons Carbon. From "Sources of data.xlsm", sheet "Carbon bids", columns F,G.
-	# Consider increasing initial quantity of 20 to 1000 or greater.
-	with open('./data/MtC_bid_steps.csv', 'r') as Carbonfile:
-		lines = [line for line in Carbonfile]
-	for t in AllBidPeriods:
-		PT_set.add(('Carbon',t))
-		for bidstep,line in enumerate(lines[1:]):
-			bid = line.split(',')
-			APT_set.add((bidstep,'Carbon',t))
-			# Carbon emitters' bids should be positive.
-			Bapt[bidstep,'Carbon',t] = float(bid[0])*scenario.discount_rate(t - StartYear) # m dollars/m tons
-			Uapt[bidstep,'Carbon',t] = float(bid[1])/float(hector_interface.getPeriodsPerYear()) # Millions of tons
-			bidstep += 1
-
-	# 2.3 Seaweed. $/tonne, Marginal Mtons Carbon. From "Sources of data.xlsm", sheet "Seaweed".
-	with open('./data/Seaweed_bids.csv', 'r') as Seaweedfile:
-		lines = [line for line in Seaweedfile]
-	for t in AllBidPeriods:
-		PT_set.add(('Seaweed',t))
-		for bidstep,line in enumerate(lines[1:]):
-			bid = line.split(',')
-			APT_set.add((bidstep,'Seaweed',t))
-			# Seaweed bids should be negative.
-			Bapt[bidstep,'Seaweed',t] = float(bid[0])*scenario.discount_rate(t - StartYear) # m dollars/m tons
-			Uapt[bidstep,'Seaweed',t] = float(bid[1])/float(hector_interface.getPeriodsPerYear()) # Millions of tons
-			bidstep += 1
-
-	# Unused bid data: C6F14, HFC-152a, HFC-227ea, HFC-23, HFC245ca, HFC-32, HFC-43_10.
-	# 2.3. Bid data retrieved here: C2F6, CF4, HFC-125, HFC-134a, HFC-143a, SF6.
-	# File is sorted by chemical, year, price increasing.
-	Emitters = defaults_and_utilities.getEmitters() # ['C2F6', 'CF4', 'CH4', 'Carbon', 'HFC125', 'HFC134a', 'HFC143a', 'N2O','SF6']
-	with open('./data/C2F6_CF4_HFC125_HFC134a_HFC143a_SF6_bidsteps.csv', 'r') as chemicalsfile:
-		lines = [line for line in chemicalsfile]
-		thislist = lines[0].split(',') # header: C2F6 $/kt,C2F6 kt/year,CF4 $/kt,CF4 kt/year,HFC125 $/kt,HFC125 kt/year,HFC134a $/kt,HFC134a kt/year,HFC143a $/kt,HFC143a kt/year,SF6 $/kt,SF6 kt/year
-		# Remember, Chemicals = ['Agriculture', 'Black_walnut', 'C2F6', 'CF4', 'CH4', 'Carbon', 'HFC125', 'HFC134a', 'HFC143a', 'Loblolly_pine', 'N2O', 'Ponderosa_pine', 'Seaweed', 'SF6']
-		chemicals = defaults_and_utilities.getChemicals()
-		for chemical in chemicals: assert (chemical in Emitters) # trust, but verify  = ['C2F6', 'CF4', 'HFC125', 'HFC134a', 'HFC143a', 'SF6']
-
-		for bidstep, line in enumerate(lines[1:]): # Skip header.
-			thislist = line.split(',')
-			thislist = [float(item) for item in thislist]
-			for c, chemical in enumerate(chemicals):
-				price, ktons = thislist[2*c:2*c+2]
-				for t in AllBidPeriods:
-					PT_set.add((chemicals[c],t))
-					APT_set.add((bidstep,chemicals[c],t))
-					# Data is given in $/tonne C. Quantities are kilotons, so decision variables should be $million/kiloton.
-					# Thus, $500/ton --> $0.5 million per kiloton.
-					Bapt[bidstep,chemicals[c],t] = price*scenario.discount_rate(t - StartYear)/1000.0 # m dollars/k tons
-					Uapt[bidstep,chemicals[c],t] = ktons/float(hector_interface.getPeriodsPerYear()) # Ktons per period.
-
-	# 2.4. CH4_bid_steps.csv.
-	with open('./data/CH4_bid_steps.csv', 'r') as chemicalsfile:
-		chemical = 'CH4'
-		lines = [line for line in chemicalsfile]
-		for bidstep, line in enumerate(lines[1:]):
-			price, mtons = line.split(',')
-			price = float(price)
-			mtons = float(mtons)
-			for t in AllBidPeriods:
-				PT_set.add((chemical,t))
-				APT_set.add((bidstep,chemical,t))
-				Bapt[bidstep,chemical,t] = price*scenario.discount_rate(t  - StartYear) # Mega dollars/megatons
-				# As described in "1-s2.0-S2352340919306882-mmc1, CH4 and NO2, jfr 1.xlsm", sheet "SSP2 CH4 N2O baseline emissions".
-				Uapt[bidstep,chemical,t] = mtons/float(hector_interface.getPeriodsPerYear())
-
-	# 2.5. N2O_bid_steps.csv.
-	with open('./data/N2O_bid_steps.csv', 'r') as chemicalsfile:
-		chemical = 'N2O'
-		lines = [line for line in chemicalsfile]
-		for bidstep, line in enumerate(lines[1:]):
-			price, mtons = line.split(',')
-			price = float(price)
-			mtons = float(mtons)
-			for t in AllBidPeriods:
-				PT_set.add((chemical,t))
-				APT_set.add((bidstep,chemical,t))
-				Bapt[bidstep,chemical,t] = price*scenario.discount_rate(t - StartYear) # Mega dollars/megatons
-				# As described in "1-s2.0-S2352340919306882-mmc1, CH4 and NO2, jfr 1.xlsm", sheet "SSP2 CH4 N2O baseline emissions".
-				Uapt[bidstep,chemical,t] = mtons/float(hector_interface.getPeriodsPerYear()) # Megatons
-
-	# 2.6. Forestry_bid_steps.csv,
-	Treetypes = defaults_and_utilities.getTreeTypes() #['Loblolly_pine_150', 'Ponderosa_pine_150', 'Black_walnut_150', 'Loblolly_pine_10', 'Ponderosa_pine_10', 'Black_walnut_10', 'Loblolly_pine_24', 'Ponderosa_pine_103', 'Black_walnut_55']
-	with open ('./data/Forestry_bid_steps.csv', 'r') as forestryfile: # Tonnes/hectare/year Loblolly pine, Tonnes/hectare/year Ponderosa pine	Tonnes/hectare/year Black walnut
-		lines = [line.split(',') for line in forestryfile]
-		# units = lines[0] # header: 'Plantable k hectares/year bid qty per crop', '2019 $/hectare Loblolly Pine', '2019 $/hectare ponderosa pine,2019 $/hectare black walnut'.
-		bidstep = 0
-		for line in lines[1:]: # Plantable k hectares/year bid qty per crop, 2019 $/hectare Loblolly Pine, 2019 $/hectare ponderosa pine, 2019 $/hectare black walnut
-			for t in AllBidPeriods:
-				for r, tree in enumerate(Treetypes):
-					PT_set.add((tree, t))
-					APT_set.add((bidstep, tree, t))
-					# Forestry bids should be negative.
-					Bapt[bidstep, tree, t] = float(line[1 + r])*scenario.discount_rate(t - StartYear) # (M dollars)/(M hectares)
-					Uapt[bidstep, tree, t] = float(line[0])/float(hector_interface.getPeriodsPerYear()) # M hectares plantable in each period.
-			bidstep += 1
+	Bidders = database_interface.get_bidders()
+	for bidder in Bidders:
+		bidder_name = bidder['bidder_name']
+		bids = database_interface.get_bids(bidder_name)  # Returns list of (price, quantity) tuples
+		for t in AllBidPeriods:
+			PT_set.add((bidder_name, t))
+			for bidstep, (price, quantity) in enumerate(bids):
+				APT_set.add((bidstep, bidder_name, t))
+				if bidder['units'] == 'kt':
+					# For ['C2F6', 'CF4', 'HFC125', 'HFC134a', 'HFC143a', 'SF6'], data is given in $/ton and quantities are kilotons, but decision variables should be $million/kiloton.
+					# Thus, $500/ton --> $0.5 million per kiloton, so we need to divide by 1000.
+					Bapt[bidstep, bidder_name, t] = price * scenario.discount_rate(t - StartYear)/1000
+				else: Bapt[bidstep, bidder_name, t] = price * scenario.discount_rate(t - StartYear)
+				Uapt[bidstep, bidder_name, t] = quantity / hector_interface.getPeriodsPerYear()
 	return Bapt, Uapt, APT_set, PT_set
 
 def run_SMDAMAGE(scenario): # Main function. Solve the SMDAMAGE model to find the best schedule of emissions and carbon removal.
@@ -630,9 +553,9 @@ if __name__ == "__main__":
 	# VI.A. Figure 1. SMDAMAGE uncalibrated. Uses the same tau for every year.
 	figure1 = defaults_and_utilities.Scenario(comment = "Fig1", discount_rate = 0.03, initial_temperature = 1400.0, tau = 2.5, is_revenue_neutral = True, is_removal_luc = False, use_updated_Wpt = False)
 	run_SMDAMAGE(figure1)
-	hector_interface.run_Hector_with_SMDAMAGE_solution(figure1) # 3. Run Hector on SMDAMAGE output.
-	plotting_utils.plot_temps_SMDAMAGE_and_Hector(figure1, *get_SMDAMAGE_temps_actual_and_taxed(figure1), hector_interface.get_Hector_temperature(figure1), defaults_and_utilities.getOutputDirectory, defaults_and_utilities.experimentTag_to_file_name)
-	calibrated_initial_temperature = wpt_calibration.run_SMDAMAGE_fit_W(figure1) # Should return 971.24975.
+	# hector_interface.run_Hector_with_SMDAMAGE_solution(figure1) # 3. Run Hector on SMDAMAGE output.
+	# plotting_utils.plot_temps_SMDAMAGE_and_Hector(figure1, *get_SMDAMAGE_temps_actual_and_taxed(figure1), hector_interface.get_Hector_temperature(figure1), defaults_and_utilities.getOutputDirectory, defaults_and_utilities.experimentTag_to_file_name)
+	# calibrated_initial_temperature = wpt_calibration.run_SMDAMAGE_fit_W(figure1) # Should return 971.24975.
 
 	# # VI.B. Figure 1. SMDAMAGE calibrated. discount_rate 0.03, initial_temperature 971.24975, tau 2.5, is_revenue_neutral True, is_removal_luc False, use_updated_Wpt False.
 	# figure1.initial_temperature = calibrated_initial_temperature

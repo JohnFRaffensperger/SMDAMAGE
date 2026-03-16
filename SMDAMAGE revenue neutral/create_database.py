@@ -6,10 +6,10 @@ import csv
 import os
 import sys
 
-sys.path.append("./SMDAMAGE revenue neutral")
+# sys.path.append("..")  # Add parent directory to find database_interface.py
 from database_interface import database_exists, do_insert, do_query, show_database_info
 
-DATA_DIR = "Data" # Holds all the CSV files with bidder and warming factor data. Make sure this directory exists and contains the necessary CSV files before running this script.
+DATA_DIR = "../Data" # Holds all the CSV files with bidder and warming factor data. Make sure this directory exists and contains the necessary CSV files before running this script.
 
 # Simple bidders can be loaded directly with add_bidder
 SIMPLE_BIDDERS = [
@@ -20,7 +20,7 @@ SIMPLE_BIDDERS = [
 	{'bidder_name': 'N2O', 'csv_filename': 'N2O_bid_steps.csv', 'bidder_class': 'Emitter', 'units': 'mt', 'contract_years': 1, 'hector_name': 'N2O_emissions', 'description': 'Nitrous oxide emissions'}
 ]
 
-# Multi-column CSV files. Easy to make but require special handling to split into individual bidders with their own price and quantity columns.
+# Multi-column CSV files. The multi-column CSV is convenient but requires special handling to split into individual bidders with their own price and quantity columns.
 MULTI_COLUMN_BIDDERS = {'chemicals': {
 		'csv_filename': 'C2F6_CF4_HFC125_HFC134a_HFC143a_SF6_bidsteps.csv',
 		'shared_quantity_col': None,  # Each bidder has its own quantity column
