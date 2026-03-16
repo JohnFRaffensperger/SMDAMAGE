@@ -1,0 +1,28 @@
+{
+	// Python indentation settings
+	"[python]": {
+		"editor.insertSpaces": false,
+		"editor.tabSize": 4,
+		"editor.indentSize": 4,
+		"editor.detectIndentation": false
+	},
+	// Global editor settings
+	"editor.insertSpaces": false,
+	"editor.tabSize": 4,
+	"editor.indentSize": 4,
+	"editor.detectIndentation": false,
+	// Show whitespace characters to visualize tabs/spaces
+	"editor.renderWhitespace": "boundary",
+	// Trim trailing whitespace on save
+	"files.trimTrailingWhitespace": true,
+	// Insert final newline
+	"files.insertFinalNewline": true,
+	// Format on save to maintain consistency
+	"editor.formatOnSave": true,
+	// Python formatter settings (if using Black or autopep8)
+	"python.formatting.provider": "autopep8",
+	"python.formatting.autopep8Args": [
+		"--indent-size=4",
+		"--use-tabs"
+	]
+}
