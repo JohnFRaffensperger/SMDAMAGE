@@ -1,0 +1,33 @@
+# Large plot files that shouldn't be committed
+*.lpt
+SMDAMAGE revenue neutral/Output/*.lpt
+Data/*.lpt
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+env/
+.env
+
+# IDE files
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Large data files over 100MB
+*.pkl
+!small_*.pkl
+
+# Temporary files
+*.tmp
+*.temp
+*~
