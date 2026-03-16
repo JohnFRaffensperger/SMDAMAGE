@@ -1,4 +1,4 @@
-# Part II. Getting pulse information from Hector. John F. Raffensperger, 2019. 
+# Part II. Getting pulse information from Hector. John F. Raffensperger, 2019.
 # =============================================================================================
 # This code changes the input to Hector, runs Hector, and reads the output,
 # with a pulse increase in each chemical, one chemical at a time, and then records the change in temperature.
@@ -6,9 +6,9 @@
 # Before you run this code:
 # 	(1) run Hector with \input\hector_rcp26.ini and \input\emissions\rcp26_emissions.ini. You should get \output\outputstream_rcp26.csv. This output file has the base temperature by year.
 # 	(2) Prepare \input\hector_rcp26_pulsed.ini:
-# 		(a) open hector_rcp26.ini, 
+# 		(a) open hector_rcp26.ini,
 # 		(b) in section [core], replace "run_name=rcp26" with "run_name=rcp26_emissions_pulsed". This tells Hector to write \output\outputstream_rcp26_pulsed.csv.
-# 		(c) replace text "RCP26_emissions.csv" with "RCP26_emissions_pulsed.csv". 
+# 		(c) replace text "RCP26_emissions.csv" with "RCP26_emissions_pulsed.csv".
 # 		(d) Save as \input\emissions\rcp26_emissions_pulsed.ini.
 
 # For each greenhouse gas activity, this code will:
@@ -24,23 +24,23 @@ import subprocess
 from math import log10, floor
 import defaults_and_utilities
 
-def getPeriodsPerYear(): 
+def getPeriodsPerYear():
 	return 1 # Not debugged for larger values. Probably dumb, as it imposes a need for floating indices, e.g., 2025.5. Depends on your climate simulator's ability to handle fractional years, i.e., getPulse().
 
 # This reads the existing emission in inputfile (e.g., RCP26_emissions.csv) and increases it in outputfilename (e.g., RCP26_emissions_pulsed.csv).
 # The outputfilename is the new input for Hector.
-def increaseEmission(pulse_year, inputfilename, outputfilename, chemical): 
+def increaseEmission(pulse_year, inputfilename, outputfilename, chemical):
 	with open (inputfilename, 'r') as inputfile, open (outputfilename, 'w') as outputfile:
 		line_counter = 0
 		previousline = []
 		for line in inputfile:
-			linelist = [item.strip() for item in line.split(',')] 
+			linelist = [item.strip() for item in line.split(',')]
 			# print (linelist)
 			if line_counter == 3: # i.e., we're on the fourth line reading actual data.
 				if chemical not in linelist:
 					print("Fail with chemical "+ chemical) # Probably should just exit() here, because it means you're trying to pulse a chemical not in the input file.
 					return 'fail', 0.0
-				else: 
+				else:
 					chemindex = linelist.index(chemical)
 					units = previousline[chemindex]
 			if linelist[0] == str(pulse_year): # Are we at the line with the year to pulse?
@@ -69,7 +69,7 @@ def readTemperatureOutput(outputfilename): # Read the temperature output from He
 # Run once. Output is Pulses_by_chemical.txt, which contains the marginal temperature changes for each chemical.
 # Move Pulses_by_chemical.txt from the Hector directory to your /data/ directory.
 # Then you've got it and don't need to run it again.
-def get_Pulses_from_Hector(): 
+def get_Pulses_from_Hector():
 	pulse_year = 2005 # Chosen because it's before the phaseout of some refrigerants.
 	pathname = "D:/Work documents/2 Research/Global warming/Numerical Simulation/hector-2.0.1-Windows/"
 	# pathname = "C:/Users/johnr/Documents/Work documents/2 Research/Global warming/Numerical Simulation/hector-2.0.1-Windows/"
@@ -100,11 +100,11 @@ def get_Pulses_from_Hector():
 	# List of chemicals in  SMDAMAGE. We need to pulse only the ones in SMDAMAGE.
 	chemicals = ['ffi_emissions', 'CH4_emissions', 'N2O_emissions', 'CF4_emissions', 'C2F6_emissions', 'HFC125_emissions', 'HFC134a_emissions', 'HFC143a_emissions', 'SF6_emissions']
 	for chemical in chemicals:
-		
+
 		#3. Create an emissions pulse in the emissions input file.
 		units, pulse = increaseEmission(pulse_year, pathname + file_list["Base_emissions_input"], pathname + file_list["Pulsed_emissions_input"], chemical)
-		
-		# 4. Run Hector to find the pulsed temperature. 
+
+		# 4. Run Hector to find the pulsed temperature.
 		returnvalue = subprocess.call(pathname + file_list["Hector_batch"], shell=True)
 
 		# 5. Read the pulsed output to get the temperature in each year from the pulse.
@@ -117,8 +117,8 @@ def get_Pulses_from_Hector():
 		# 6. Save the pulse output.
 		if abs(sum(temperature_pulse_list)) == 0.0: # effect could be positive or negative warming, depending on the gas
 			print ("For " + chemical + ", total pulse effect = %f, NOTHING SAVED." % sum(temperature_pulse_list))
-		else: 	
-			with open (file_list ["Final_output_file"], 'a+') as outputfile: 
+		else:
+			with open (file_list ["Final_output_file"], 'a+') as outputfile:
 				# Save the chemical name, the size of the pulse, the units, and the list of marginal temperatures.
 				outputfile.write(chemical + ',' + str(-pulse) + ',' + units + ',' + ','.join([str(-p) for p in temperature_pulse_list]) + '\n')
 			print ("For " + chemical + ", total pulse effect = %f" % sum(temperature_pulse_list))
@@ -128,7 +128,7 @@ def get_Pulses_from_Hector():
 # ========================================================================================
 # Part IV. Running Hector on SMDAMAGE output. Does the SMDAMAGE activity schedule result in the correct temperature trajectory in Hector?
 # John F Raffensperger. 2022-07-27, 2022-09-10, 2025-01-05.
-# ======================================================================================== 
+# ========================================================================================
 # Reads the Hector input file RCP_emissions, returns a dictionary RCP_emissions [year, emissionsType] = emissionsValue.
 # Called from convert_SMDAMAGE_solution_to_Hector_input().
 def getHectorEmissionsDictionary(RCP26_emissions_file): # e.g., "RCP26_emissions.csv"
@@ -169,14 +169,14 @@ def convert_SMDAMAGE_solution_to_Hector_input (scenario):
 	firstYear = 1765 # in RCP26_emissions.csv.
 	first_SMDAMAGE_year = int(defaults_and_utilities.getStartYear())
 	lastYear = int(defaults_and_utilities.getLastBidYear()) # because for example smdamage_solution_2070.csv includes 2169.5.
-	
+
 	SMDAMAGE_to_Hector = {} # [(firstYear, pollutant): value, ... (lastYear, pollutant): value]
-	
+
 	# 1. Pollutants not in SMDAMAGE, all years. Using future RCP26 emissions.
 	leaveAlone = ['HFC227ea_emissions', 'HFC245fa_emissions', 'HFC32_emissions', 'HFC4310_emissions', 'CFC11_emissions', 'CFC12_emissions', 'CFC113_emissions', 'CFC114_emissions', 'CFC115_emissions', 'CCl4_emissions', 'CH3CCl3_emissions', 'HCF22_emissions', 'HCF141b_emissions', 'HCF142b_emissions', 'halon1211_emissions', 'HALON1202', 'halon1301_emissions', 'halon2402_emissions', 'CH3Br_emissions', 'CH3Cl_emissions', 'SOx', 'SO2_emissions', 'CO_emissions', 'NMVOC_emissions', 'NOX_emissions', 'BC_emissions', 'OC_emissions', 'NH3', 'C6F14', 'HFC23_emissions']
 	for columnNumber, pollutant in enumerate(leaveAlone):
 		for year in range(firstYear, lastYear + 1): SMDAMAGE_to_Hector[(year, pollutant)] = RCP26_emissions[(year, pollutant)]
-	
+
 	# 2. Pollutants in SMDAMAGE, years < 2025.
 	Matching_RCP_to_SMDAMAGE_columns = {'CH4_emissions': 'CH4 mt', 'N2O_emissions': 'N2O mt', 'CF4_emissions': 'CF4 kt', 'C2F6_emissions': 'C2F6 kt', 'HFC125_emissions': 'HFC125 kt', 'HFC134a_emissions': 'HFC134a kt', 'HFC143a_emissions': 'HFC143a kt', 'SF6_emissions': 'SF6 kt'}
 	for pollutant in Matching_RCP_to_SMDAMAGE_columns:
@@ -186,7 +186,7 @@ def convert_SMDAMAGE_solution_to_Hector_input (scenario):
 		SMDAMAGE_to_Hector[(year, 'ffi_emissions')] = RCP26_emissions[(year, 'ffi_emissions')]
 		SMDAMAGE_to_Hector[(year, 'luc_emissions')] = RCP26_emissions[(year, 'luc_emissions')]
 
-	# 3. Pollutants in SMDAMAGE, years >= 2025. Non-matching columns. ffi_emissions = 'Carbon mtC', and 'luc_emissions' = - 'Agriculture mtC' - 'Seaweed mt' - carbonRemovedByForestry.
+	# 3. Pollutants in SMDAMAGE, years >= 2025. Non-matching columns. ffi_emissions = 'Carbon mtC', and 'luc_emissions' = - 'Agriculture mtC' - 'Seaweed mtC' - carbonRemovedByForestry.
 	for pollutant in Matching_RCP_to_SMDAMAGE_columns:
 		for year in range(first_SMDAMAGE_year, lastYear + 1):
 			SMDAMAGE_to_Hector[(year, pollutant)] = (SMDAMAGE_emissions [(year, Matching_RCP_to_SMDAMAGE_columns[pollutant])])
@@ -197,9 +197,9 @@ def convert_SMDAMAGE_solution_to_Hector_input (scenario):
 		# Start with the RCP26 land use change emissions, then subtract the SMDAMAGE agriculture, seaweed, and forestry emissions.
 		SMDAMAGE_to_Hector[(year, 'ffi_emissions')] = (SMDAMAGE_emissions [(year, 'Carbon mtC')])/1000.0 # Convert mtC to GtC.
 		SMDAMAGE_to_Hector[(year, 'luc_emissions')] = RCP26_emissions[(year, 'luc_emissions')]
-		
-		if scenario.is_removal_luc:	SMDAMAGE_to_Hector[(year, 'luc_emissions')] -= (SMDAMAGE_emissions [(year, 'Agriculture mtC')] + SMDAMAGE_emissions [(year, 'Seaweed mt')] + carbonRemovedByForestry [year])/1000.0 # Convert mtC to GtC.
-		else: SMDAMAGE_to_Hector[(year, 'ffi_emissions')] -= (SMDAMAGE_emissions [(year, 'Agriculture mtC')] + SMDAMAGE_emissions [(year, 'Seaweed mt')] + carbonRemovedByForestry [year])/1000.0 # Convert mtC to GtC.
+
+		if scenario.is_removal_luc:	SMDAMAGE_to_Hector[(year, 'luc_emissions')] -= (SMDAMAGE_emissions [(year, 'Agriculture mtC')] + SMDAMAGE_emissions [(year, 'Seaweed mtC')] + carbonRemovedByForestry [year])/1000.0 # Convert mtC to GtC.
+		else: SMDAMAGE_to_Hector[(year, 'ffi_emissions')] -= (SMDAMAGE_emissions [(year, 'Agriculture mtC')] + SMDAMAGE_emissions [(year, 'Seaweed mtC')] + carbonRemovedByForestry [year])/1000.0 # Convert mtC to GtC.
 	return SMDAMAGE_to_Hector
 
 # Convert SMDAMAGE output to  Hector input.
@@ -208,13 +208,13 @@ def write_SMDAMAGE_solution_to_Hector_input (scenario, SMDAMAGE_to_Hector_dict):
 	years = sorted(list(years.union([key[0] for key in SMDAMAGE_to_Hector_dict.keys()])))
 	pollutantSet = set()
 	pollutantSet = pollutantSet.union([key[1] for key in SMDAMAGE_to_Hector_dict.keys()])
-	
+
 	# Write the SMDAMAGE solution dictionary to Hector input csv.
 	with open (f"../../hector-2.0.1-Windows/input/emissions/" + defaults_and_utilities.experimentTag_to_file_name(scenario) + ".csv", 'w') as outputfile:
 		header = "Year," + ','.join(pollutantSet)
 		outputfile.write(header + "\n")
 		for year in years:
-			line = str(year) + "," 
+			line = str(year) + ","
 			for pollutant in pollutantSet: line = line + str(SMDAMAGE_to_Hector_dict[(year, pollutant)]) + ","
 			outputfile.write(line + "\n")
 	# print("Converted SMDAMAGE output to Hector input.")
@@ -237,7 +237,7 @@ def run_Hector_with_SMDAMAGE_solution(scenario): # Goal is to get the Hector tem
 	# Create batch file to run Hector.
 	with open ('run_hector.bat', 'w') as output_batch_file:
 		output_batch_file.write("hector input/" + hector_ini_file_name + " > hectorspew.txt")
-	
+
 	# print("Calling Hector now...")
 	subprocess.call(hector_directory + 'run_hector.bat', shell=True)
 	os.chdir(original_directory)
