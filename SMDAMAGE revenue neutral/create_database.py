@@ -2,6 +2,23 @@
 """
 Create SQLite database for SMDAMAGE CSV data. Produced by Claude with JFR's guidance.
 """
+# >>> Part I. Preliminaries, inputs, key parameters: create_database.py, database_interface.py, and defaults_and_utilities.py.
+# Part II. Getting pulse information from Hector: hector_interface.py.
+# Part III. SMDAMAGE: "SMDAMAGE revenue neutral.py"
+# Part IV. Running Hector on SMDAMAGE output. hector_interface.py.
+# =============================================================================================
+# Source data files. Create these files first. The function create_database() loads these to the SMDAMAGE database.
+# ../data/Calibrated_pulses_by_chemical_2025.txt. Create this with Hector.
+# Following are all from "Sources of data for SMDAMAGE 2026.xlsx":
+# ../data/Forestry_Sequestration.csv, Year, Tonnes/hectare/year Loblolly pine, Tonnes/hectare/year Ponderosa pine	Tonnes/hectare/year Black walnut
+# ../data/Forestry_bid_steps.csv, Tonnes/hectare/year Loblolly pine, Tonnes/hectare/year Ponderosa pine	Tonnes/hectare/year Black walnut
+# ../data/MtC_bid_steps.csv,
+# ../data/C2F6_CF4_HFC125_HFC134a_HFC143a_SF6_bidsteps.csv,
+# ../data/CH4_bid_steps.csv,
+# ../data/N2O_bid_steps.csv,
+# ../data/Agriculture_bids.csv,
+# ../data/Seaweed_bids.csv.
+
 import csv
 import os
 import sys
@@ -10,6 +27,8 @@ import sys
 from database_interface import database_exists, do_insert, do_query, show_database_info
 
 DATA_DIR = "../Data" # Holds all the CSV files with bidder and warming factor data. Make sure this directory exists and contains the necessary CSV files before running this script.
+CHEMICAL_PULSES_FILE = 'Calibrated_pulses_by_chemical_2025.txt' # Make this with Hector.
+FORESTRY_SEQUESTRATION_FILE = 'Forestry_sequestration.csv'
 
 # Simple bidders can be loaded directly with add_bidder
 SIMPLE_BIDDERS = [
@@ -49,10 +68,6 @@ MULTI_COLUMN_BIDDERS = {'chemicals': {
 		]
 	}
 }
-
-# Other data file configurations
-CHEMICAL_PULSES_FILE = 'Calibrated_pulses_by_chemical_2025.txt'
-FORESTRY_SEQUESTRATION_FILE = 'Forestry_sequestration.csv'
 
 def create_database():
 	"""Create the SQLite database and populate with CSV data"""

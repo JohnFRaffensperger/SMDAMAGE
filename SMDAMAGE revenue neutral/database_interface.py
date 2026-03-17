@@ -2,6 +2,11 @@
 """
 Database interface module for SMDAMAGE. Made by Claude with JFR's guidance.
 """
+# >>> Part I. Preliminaries, inputs, key parameters: create_database.py, database_interface.py, and defaults_and_utilities.py.
+# Part II. Getting pulse information from Hector: hector_interface.py.
+# Part III. SMDAMAGE: "SMDAMAGE revenue neutral.py"
+# Part IV. Running Hector on SMDAMAGE output. hector_interface.py.
+
 import sqlite3
 import os
 

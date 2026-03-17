@@ -1,53 +1,21 @@
-# Simulation of SMDAMAGE, by John F Raffensperger. 10 Aug 2019, 10 Sep 2022, 17 May 2023, 6 Jan 2025, 3 Feb 2025.
+# Simulation of SMDAMAGE, by John F Raffensperger. 10 Aug 2019, 10 Sep 2022, 17 May 2023, 3 Feb 2025, 17 Mar 2026.
 # Hector uses gigatons of carbon, so we need to convert Hector's gigatons warming effects to SMDAMAGE megatons decision variables and back again to Hector gigatons for validation.
 # Critical values: discount rate in discount_rate(), StartYear (e.g., 2025), BeginConstraintYear (warming deadline, e.g., 2125), revenue neutrality as REVENUE_NEUTRAL, and InitialTemperature.
 # Longer term: switch to auction software.
 
 # =============================================================================================
-# Part I. Preliminaries, inputs, key parameters.
+# Part I. Preliminaries, inputs, key parameters: create_database.py, database_interface.py, and defaults_and_utilities.py.
+# Part II. Getting pulse information from Hector: hector_interface.py.
+# >>> Part III. SMDAMAGE: "SMDAMAGE revenue neutral.py". This is the main program. Experiments are at the bottom of this file.
+# Part IV. Running Hector on SMDAMAGE output: hector_interface.py.
 # =============================================================================================
-# Input files
-# ../data/Calibrated_pulses_by_chemical_2025.txt
-# Following are all from "Sources of data, corrected forestry.xlsm":
-# ../data/Forestry_Sequestration.csv, Year, Tonnes/hectare/year Loblolly pine, Tonnes/hectare/year Ponderosa pine	Tonnes/hectare/year Black walnut
-# ../data/Forestry_bid_steps.csv, Tonnes/hectare/year Loblolly pine, Tonnes/hectare/year Ponderosa pine	Tonnes/hectare/year Black walnut
-# ../data/MtC_bid_steps.csv,
-# ../data/C2F6_CF4_HFC125_HFC134a_HFC143a_SF6_bidsteps.csv,
-# ../data/CH4_bid_steps.csv,
-# ../data/N2O_bid_steps.csv,
-# ../data/Agriculture_bids.csv,
-# ../data/Seaweed_bids.csv.
 
-import sys
-import os
-# Add parent directory to Python path to find database_interface.py
-# sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-
-# from database_interface import get_bids
-import database_interface
+import database_interface # reads the SMDAMAGE database.
 import defaults_and_utilities # Default parameters and utility functions
-# import database_interface # Read the SMDAMAGE database.
 import hector_interface # Hector pulse generation functions.
-# import matplotlib.pyplot as mplot # graphing.
-# import os # file management.
 import pickle # saving and retrieving solutions, especially the calibrated Wpt.
-import plotting_utils # Consolidated plotting functions
 from pulp import * #pulp.pulpTestAll() # to solve the linear programs.
 import time # for timing the run.
-import wpt_calibration # Wpt calibration functions
-
-# ============================================================================================
-# Part III. SMDAMAGE.
-# ============================================================================================
-
-def old_taxed_temps(scenario, your_taxed_temps_filename): # retrieves previously saved solution vpt.
-	if not scenario.is_revenue_neutral: return {}
-	print(os.getcwd())
-	with open(defaults_and_utilities.getOutputDirectory() + your_taxed_temps_filename + "_taxed_temps.pkl", "rb") as mypickle:
-		taxed_temps = pickle.load(mypickle)
-	return {t: scenario.initial_temperature + taxed_temps[t].varValue for t in taxed_temps}
-# print(defaults_and_utilities.get_tree_schedule_carbon_removal(old_vpt(defaults_and_utilities.getExperimentTag(scenario) + ".pkl")))
-# exit()
 
 def get_warming_effects(scenario): # Get warming effects in degrees Celsius in each period, based on the solution vpt.
 	Pulse = hector_interface.getPulse() # Reads the Pulse input file.
@@ -66,7 +34,7 @@ def get_warming_effects(scenario): # Get warming effects in degrees Celsius in e
 			Wpt_dict [('luc', float(t0))] = Wpt_pkl[('luc', float(t0))]
 			Wpt_dict [('Carbon', float(t0))] = Wpt_pkl[('Carbon', float(t0))]
 		else:
-			# Looks dumb to have 1000 in the numerator and denominator. Denominator 1000 converts degrees C/gigaton to degrees C/megaton. Numerator 1000 converts degrees to thousandths of a degree.
+			# Looks dumb to have 1000 in the numerator and denominator, but this is for clarity. Denominator 1000 converts degrees C/gigaton to degrees C/megaton. Numerator 1000 converts degrees to thousandths of a degree.
 			Wpt_dict [('luc', float(t0))] = Pulse['luc'][1 + t0]*scaleCelsius/Pulse['ffi'][0]/1000.0
 			Wpt_dict [('Carbon', float(t0))] = Pulse['ffi'][1 + t0]*scaleCelsius/Pulse['ffi'][0]/1000.0
 
@@ -93,20 +61,6 @@ def get_warming_effects(scenario): # Get warming effects in degrees Celsius in e
 		for t0 in range(defaults_and_utilities.getPulseDataLength()):
 			Wpt_dict[(p, float(t0))] = Pulse[p][1 + t0]*scaleCelsius/Pulse[p][0]
 	return Wpt_dict
-
-def load_bids(bidder, AllBidPeriods, PT_set, APT_set, Bapt, Uapt, StartYear, scenario, PeriodsPerYear):
-	"""""
-	Args:
-		bidder: Database record of the bidder, e.g., (3, 'Carbon', 'Emitter', 'mtC', 1, 'ffi_emissions', 'Carbon emissions')
-		AllBidPeriods (list): List of bid periods
-		PT_set (set): Set to store (pollutant, time) tuples
-		APT_set (set): Set to store (agent, pollutant, time) tuples
-		Bapt (dict): Dictionary for bid prices
-		Uapt (dict): Dictionary for upper bid quantities
-		StartYear (int): Starting year for calculations
-		scenario: Scenario object with discount_rate method
-		PeriodsPerYear (float): Number of periods per year
-	"""
 
 def read_bids(scenario):
 	AllBidPeriods = defaults_and_utilities.getBidPeriods()
@@ -157,82 +111,81 @@ def run_SMDAMAGE(scenario): # Main function. Solve the SMDAMAGE model to find th
 
 	local_tau = scenario.tau # We have to change tau when the temperature is low enough (at the end of this loop), but we don't want to change the output filename.
 
-	# You might want to solve the model for multiple BeginConstraintYears, e.g., 2125, 2126, ... Delaying the deadline lowers the cost of removal.
-	for BeginConstraintYear in range(int(defaults_and_utilities.getFirstConstrainedYear()), int(defaults_and_utilities.getFirstConstrainedYear()) + 1, 1):
-		ConstraintPeriods = [float(BeginConstraintYear) + float(t)/float(hector_interface.getPeriodsPerYear()) for t in range(hector_interface.getPeriodsPerYear()*(defaults_and_utilities.getPulseDataLength() + int(defaults_and_utilities.getStartYear()) - int(BeginConstraintYear)))] # e.g., 2120, 2120.5, 2121, 2121.5, ..., 2301
-		assert (BeginConstraintYear <= defaults_and_utilities.getStartYear() + defaults_and_utilities.getNumber_of_bid_years())
+	BeginConstraintYear = int(defaults_and_utilities.getFirstConstrainedYear()) # e.g., 2125.
+	ConstraintPeriods = [float(BeginConstraintYear) + float(t)/float(hector_interface.getPeriodsPerYear()) for t in range(hector_interface.getPeriodsPerYear()*(defaults_and_utilities.getPulseDataLength() + int(defaults_and_utilities.getStartYear()) - int(BeginConstraintYear)))] # e.g., 2120, 2120.5, 2121, 2121.5, ..., 2301
+	assert (BeginConstraintYear <= defaults_and_utilities.getStartYear() + defaults_and_utilities.getNumber_of_bid_years())
 
-		# print ("3. Creating model for first constraint year of " + str(BeginConstraintYear))
-		SMDAMAGE = LpProblem("SMDAMAGE", LpMaximize)
+	# print ("3. Creating model for first constraint year of " + str(BeginConstraintYear))
+	SMDAMAGE = LpProblem("SMDAMAGE", LpMaximize)
 
-		# print("Objective...", sep=None)
-		SMDAMAGE += defaults_and_utilities.inflate_2020_to_2025()*lpSum(Bapt[a,p,t]*qapt[a,p,t] for (a, p, t) in APT_set), "Total value"
+	# print("Objective...", sep=None)
+	SMDAMAGE += defaults_and_utilities.inflate_2020_to_2025()*lpSum(Bapt[a,p,t]*qapt[a,p,t] for (a, p, t) in APT_set), "Total value"
 
-		# print("Vpt rows...", sep=None)
-		Vname = {}
-		for (p, t) in PT_set:
-			Vname[(p,t)] = "Vpt(" + p + "," + str(t) + ")"
-			SMDAMAGE += vpt[p,t] == lpSum ([qapt[a,p,t] for a in BidStepSet[p,t]]), Vname[(p,t)]
+	# print("Vpt rows...", sep=None)
+	Vname = {}
+	for (p, t) in PT_set:
+		Vname[(p,t)] = "Vpt(" + p + "," + str(t) + ")"
+		SMDAMAGE += vpt[p,t] == lpSum ([qapt[a,p,t] for a in BidStepSet[p,t]]), Vname[(p,t)]
 
-		# print("Capt rows...")
-		temperatureChange = {t: LpVariable("tempChange(" + str(t) + ")", None, None) for t in defaults_and_utilities.getModelPeriods()}
+	# print("Capt rows...")
+	temperatureChange = {t: LpVariable("tempChange(" + str(t) + ")", None, None) for t in defaults_and_utilities.getModelPeriods()}
 
-		# Measuring actual temperature change, not the "taxed" surrogate temperature. If REVENUE_NEUTRAL, Temp_t equations should not constrain the model.
-		for t in defaults_and_utilities.getModelPeriods(): SMDAMAGE += lpSum ([Wpt_dict[(p, float(t - u))]*vpt[p,u] for (p,u) in PT_set if u <= t]) - temperatureChange[t] == 0, "Temp_t(" + str(t) + ")"
+	# Measuring actual temperature change, not the "taxed" surrogate temperature. If REVENUE_NEUTRAL, Temp_t equations should not constrain the model.
+	for t in defaults_and_utilities.getModelPeriods(): SMDAMAGE += lpSum ([Wpt_dict[(p, float(t - u))]*vpt[p,u] for (p,u) in PT_set if u <= t]) - temperatureChange[t] == 0, "Temp_t(" + str(t) + ")"
 
-		if scenario.is_revenue_neutral: # Taxed net zero model.
-			taxedTemperatureChange = {t: LpVariable("taxedTempChange(" + str(t) + ")", None, None) for t in defaults_and_utilities.getModelPeriods()}
+	if scenario.is_revenue_neutral: # Taxed net zero model.
+		taxedTemperatureChange = {t: LpVariable("taxedTempChange(" + str(t) + ")", None, None) for t in defaults_and_utilities.getModelPeriods()}
 
-			for t in defaults_and_utilities.getModelPeriods():
-				SMDAMAGE += lpSum ([local_tau*Wpt_dict[(p,t - u)]*vpt[p,u] for (p,u) in PT_set if p in Emitters and u <= t and u <= BeginConstraintYear - 1.0]) \
-						+ lpSum ([Wpt_dict[(p,t - u)]*vpt[p,u] for (p,u) in PT_set if p in Emitters and u <= t and u >= BeginConstraintYear]) \
-					      + lpSum ([Wpt_dict[(p, t - u)]*vpt[p,u] for (p,u) in PT_set if p not in Emitters and u <= t]) \
-						- taxedTemperatureChange[t] == 0, "TaxedTemp_t(" + str(t) + ")"
+		for t in defaults_and_utilities.getModelPeriods():
+			SMDAMAGE += lpSum ([local_tau*Wpt_dict[(p,t - u)]*vpt[p,u] for (p,u) in PT_set if p in Emitters and u <= t and u <= BeginConstraintYear - 1.0]) \
+					+ lpSum ([Wpt_dict[(p,t - u)]*vpt[p,u] for (p,u) in PT_set if p in Emitters and u <= t and u >= BeginConstraintYear]) \
+						+ lpSum ([Wpt_dict[(p, t - u)]*vpt[p,u] for (p,u) in PT_set if p not in Emitters and u <= t]) \
+					- taxedTemperatureChange[t] == 0, "TaxedTemp_t(" + str(t) + ")"
 
-			for t in ConstraintPeriods: SMDAMAGE += taxedTemperatureChange [t] <= 0.0, "Capt(" + str(t) + ")"
-		else:
-			Capt = {t: -scenario.initial_temperature for t in ConstraintPeriods} # Allowed increase in global temp, thousandths of degrees Celsius in period t.
-			for t in ConstraintPeriods: SMDAMAGE += temperatureChange [t] <= Capt[t], "Capt(" + str(t) + ")"
+		for t in ConstraintPeriods: SMDAMAGE += taxedTemperatureChange [t] <= 0.0, "Capt(" + str(t) + ")"
+	else:
+		Capt = {t: -scenario.initial_temperature for t in ConstraintPeriods} # Allowed increase in global temp, thousandths of degrees Celsius in period t.
+		for t in ConstraintPeriods: SMDAMAGE += temperatureChange [t] <= Capt[t], "Capt(" + str(t) + ")"
 
-		# print ("4. Writing a debug model...") # SLOW! -------------------------------------------------------------
-		# SMDAMAGE.writeLP(defaults_and_utilities.getOutputDirectory() + defaults_and_utilities.getExperimentTag(scenario) + ".lpt") # Easy to open with Notepad or LP_SolveIDE
+	# print ("4. Writing a debug model...") # Edit the resulting LPT file with LP_Solve IDE.
+	# SMDAMAGE.writeLP(defaults_and_utilities.getOutputDirectory() + defaults_and_utilities.getExperimentTag(scenario) + ".lpt") # Easy to open with Notepad or LP_SolveIDE
 
-		# print ("5. Solving the model...")
-		solve_status = LpStatus[SMDAMAGE.solve(PULP_CBC_CMD(msg=0))]
+	# print ("5. Solving the model...")
+	solve_status = LpStatus[SMDAMAGE.solve(PULP_CBC_CMD(msg=0))]
 
-		netrevenue = 0.0 # Show net revenue with marginal cost pricing.
-		yearlyrevenue = {t: 0.0 for t in defaults_and_utilities.getBidPeriods()}
-		for (p,t) in PT_set:
-			netrevenue -= vpt[p,t].varValue*SMDAMAGE.constraints[Vname[(p,t)]].pi
-			yearlyrevenue[t] -= vpt[p,t].varValue*SMDAMAGE.constraints[Vname[(p,t)]].pi
+	netrevenue = 0.0 # Show net revenue with marginal cost pricing.
+	yearlyrevenue = {t: 0.0 for t in defaults_and_utilities.getBidPeriods()}
+	for (p,t) in PT_set:
+		netrevenue -= vpt[p,t].varValue*SMDAMAGE.constraints[Vname[(p,t)]].pi
+		yearlyrevenue[t] -= vpt[p,t].varValue*SMDAMAGE.constraints[Vname[(p,t)]].pi
 
-		# Save solution to CSV.
-		# Agriculture and "Carbon" are in megatons of carbon (not CO2). Hector uses gigatons of carbon, so we need to convert Hector's gigatons warming effects to SMDAMAGE megatons decision variables and back again to Hector gigatons for validation.
-		Units = defaults_and_utilities.getUnits()
-		with open (defaults_and_utilities.SMDAMAGE_output_file_name(scenario), 'w') as myoutputfile:
-			myoutputfile.write(defaults_and_utilities.getExperimentTag(scenario) + ". Solve status " + solve_status + ". Total revenue " + str(netrevenue) + '\n')
-			myoutputfile.write(','.join(['Year']
-				+ [p + " " + Units[p] for p in Pollutants]
-				+ [p + " % max bid" for p in Pollutants]
-				+ [p + " $M/" + Units[p] for p in Pollutants])
-				+ ',temp change'
-				+ ',Capt pi\n')
-			print("Wrote SMDAMAGE solution to " + defaults_and_utilities.SMDAMAGE_output_file_name(scenario))
+	# Save solution to CSV.
+	# Agriculture and "Carbon" are in megatons of carbon (not CO2). Hector uses gigatons of carbon, so we need to convert Hector's gigatons warming effects to SMDAMAGE megatons decision variables and back again to Hector gigatons for validation.
+	Units = defaults_and_utilities.getUnits()
+	with open (defaults_and_utilities.SMDAMAGE_output_file_name(scenario), 'w') as myoutputfile:
+		myoutputfile.write(defaults_and_utilities.getExperimentTag(scenario) + ". Solve status " + solve_status + ". Total revenue " + str(netrevenue) + '\n')
+		myoutputfile.write(','.join(['Year']
+			+ [p + " " + Units[p] for p in Pollutants]
+			+ [p + " % max bid" for p in Pollutants]
+			+ [p + " $M/" + Units[p] for p in Pollutants])
+			+ ',temp change'
+			+ ',Capt pi\n')
+		print("Wrote SMDAMAGE solution to " + defaults_and_utilities.SMDAMAGE_output_file_name(scenario))
 
-			for t in defaults_and_utilities.getModelPeriods():
-				line = [str(t)] # Year
-				if t in defaults_and_utilities.getBidPeriods():
-					for p in Pollutants: line.append(str(vpt[p,t].varValue)) # qty units
-					for p in Pollutants: line.append(str(vpt[p,t].varValue/TotalU[p,t])) # Fraction of bid
-					for p in Pollutants: line.append(str(SMDAMAGE.constraints[Vname[(p,t)]].pi)) # $M/unit
-				else:
-					for p in Pollutants: line.append(',,')
+		for t in defaults_and_utilities.getModelPeriods():
+			line = [str(t)] # Year
+			if t in defaults_and_utilities.getBidPeriods():
+				for p in Pollutants: line.append(str(vpt[p,t].varValue)) # qty units
+				for p in Pollutants: line.append(str(vpt[p,t].varValue/TotalU[p,t])) # Fraction of bid
+				for p in Pollutants: line.append(str(SMDAMAGE.constraints[Vname[(p,t)]].pi)) # $M/unit
+			else:
+				for p in Pollutants: line.append(',,')
 
-				line.append(str(scenario.initial_temperature + temperatureChange[t].varValue))
+			line.append(str(scenario.initial_temperature + temperatureChange[t].varValue))
 
-				if t in ConstraintPeriods: line.append(str(SMDAMAGE.constraints["Capt(" + str(t) + ")"].pi))
-				else: line.append('.')
-				myoutputfile.write (','.join(line) + '\n')
+			if t in ConstraintPeriods: line.append(str(SMDAMAGE.constraints["Capt(" + str(t) + ")"].pi))
+			else: line.append('.')
+			myoutputfile.write (','.join(line) + '\n')
 
 		# SMDAMAGE_fit_W uses the vpt pickle file.
 		with open(defaults_and_utilities.getOutputDirectory() + "SMDAMAGE " + defaults_and_utilities.experimentTag_to_file_name(scenario) + ".pkl", "wb") as mypickle: pickle.dump(vpt, mypickle)
@@ -245,31 +198,12 @@ def run_SMDAMAGE(scenario): # Main function. Solve the SMDAMAGE model to find th
 		if scenario.is_revenue_neutral: defaults_and_utilities.append_temperatures_to_csv(scenario, "SMDAMAGE taxed temp calibrated" if scenario.use_updated_Wpt else "SMDAMAGE taxed temp uncalibrated", {t: scenario.initial_temperature + taxedTemperatureChange[t].varValue for t in defaults_and_utilities.getBidPeriods()})
 
 	print (f"SMDAMAGE done. Solve status {solve_status}. Objective ${value(SMDAMAGE.objective) / 1000:.2f} billion. Net revenue {netrevenue}. Tau {local_tau}. 2125 temp " + str(round(scenario.initial_temperature + temperatureChange [2125].varValue,3)) + " thousandths C.")
-
 	# print ("Done, %s, %.1f seconds." % (time.asctime(time.localtime(time.time())), float(time.time() - startTime)))
 	# print ("Reminder: convert $/ton C to $/ton CO2. Temp in 2125 is " + str(round(scenario.initial_temperature + temperatureChange [2125].varValue,3)) + " thousandths of a degree C.")
-	# print(getCarbonRemovedByForestry("Forestry carbon" + defaults_and_utilities.experimentTag_to_file_name(scenario)))
+	# print (getCarbonRemovedByForestry("Forestry carbon" + defaults_and_utilities.experimentTag_to_file_name(scenario)))
 
 	return scenario.initial_temperature + temperatureChange [2125].varValue
-
 # END run_SMDAMAGE().
-
-# def linear_interpolation(x_new, x, y): # And extrapolation.
-# 	assert len(x) == len(y), "x and y must have the same length for linear_interpolation."
-# 	assert(abs(x[1] - x[0]) > 0.0), "x[0] and x[1] values must differ for linear_interpolation."
-# 	assert(abs(x[-1] - x[-2]) > 0.0), "x[-1] and x[-2] values must differ for linear_interpolation."
-
-# 	if x_new < x[0]: return y[0] + (x_new - x[0])*(y[1] - y[0])/(x[1] - x[0])
-# 	if x_new > x[-1]: return y[-1] + (x_new - x[-1])*(y[-1] - y[-2])/(x[-1] - x[-2])
-# 	for i in range(len(x) - 1):
-# 		if x_new >= x[i] and x_new <= x[i + 1]: return y[i] + (x_new - x[i])*(y[i + 1] - y[i])/(x[i + 1] - x[i])
-# Example: tau_i = 1.5, tau_i+1 = 1.6, temp_i = 100, temp_i = -100, desired temp = 0.
-# print("\n\n", linear_interpolation(0.0, [-100.0, -80.0], [1.5, 1.55]))
-# print("\n\n", linear_interpolation(0.0, [100.0, 80.0], [1.5, 1.55]))
-# print("\n\n", linear_interpolation(0.0, [100.0, -80.0], [1.5, 1.55]))
-# print("\n\n", linear_interpolation(0.0, [-100.0, 80.0], [1.5, 1.55]))
-# print("\n\n", linear_interpolation(0.0, [-100.0, -80.0], [1.5, 1.55]))
-# print("\n\n", linear_interpolation(0.0, [-80.0, -100.0], [1.5, 1.55]))
 
 def update_tau (old_temp, current_temp, old_tau, current_tau, step_size):
 	total_change = 0.0
@@ -409,15 +343,11 @@ def run_SMDAMAGE_for_tau(scenario): # This version finds the optimal tau.
 		if scenario.is_revenue_neutral: defaults_and_utilities.append_temperatures_to_csv(scenario, "SMDAMAGE taxed temp calibrated" if scenario.use_updated_Wpt else "SMDAMAGE taxed temp uncalibrated", {t: scenario.initial_temperature + taxedTemperatureChange[t].varValue for t in defaults_and_utilities.getBidPeriods()})
 
 	print (f"SMDAMAGE done. Solve status {solve_status}. Objective ${value(SMDAMAGE.objective) / 1000:.2f} billion. Net revenue {netrevenue}. Tau {current_tau}. 2125 temp " + str(round(scenario.initial_temperature + temperatureChange [2125].varValue,3)) + " thousandths C.")
-	# print ("Reminder: convert $/ton C to $/ton CO2. Temp in 2125 is " + str(round(scenario.initial_temperature + temperatureChange [2125].varValue,3)) + " thousandths of a degree C.")
-
 	return scenario.initial_temperature + temperatureChange [2125].varValue
+# END run_SMDAMAGE_for_tau().
 
-	# print(getCarbonRemovedByForestry("Forestry carbon" + defaults_and_utilities.experimentTag_to_file_name(scenario)))
-# END run_SMDAMAGE().
-
-# This is a modified copy of run_SMDAMAGE(). Must be revenue neutral. Should use updated Wpt values.
-def run_SMDAMAGE_short_auctions(scenario): # Solve a sequence of SMDAMAGE models with 4-year auctions.
+# This modified version of run_SMDAMAGE() runs 2-year auctions which must be revenue neutral. The auctions should use the calibrated Wpt values.
+def run_SMDAMAGE_short_auctions(scenario):
 	print ("\nSMDAMAGE short auctions. " + defaults_and_utilities.getExperimentTag(scenario) + ". " + time.asctime(time.localtime(time.time())) + ".")
 	AllBidPeriods = defaults_and_utilities.getBidPeriods()
 
@@ -431,8 +361,7 @@ def run_SMDAMAGE_short_auctions(scenario): # Solve a sequence of SMDAMAGE models
 		TotalU[p,t] += Uapt[a,p,t]
 		BidStepSet[p,t].append(a)
 
-	# Agriculture and "Carbon" are in megatons of carbon (not CO2). Hector uses gigatons of carbon, so we need to convert Hector's gigatons warming effects to SMDAMAGE megatons decision variables and back again to Hector gigatons for validation.
-	Units = defaults_and_utilities.getUnits()
+	Units = defaults_and_utilities.getUnits() # Agriculture and "Carbon" are in megatons of carbon (not CO2). Hector uses gigatons of carbon, so we need to convert Hector's gigatons warming effects to SMDAMAGE megatons decision variables and back again to Hector gigatons for validation.
 
 	# Create CSV file with headers.
 	with open(defaults_and_utilities.SMDAMAGE_output_file_name(scenario), 'w') as myoutputfile:
@@ -519,18 +448,16 @@ def run_SMDAMAGE_short_auctions(scenario): # Solve a sequence of SMDAMAGE models
 				myoutputfile.write(','.join(line) + '\n')
 
 		if startyear+1 >= defaults_and_utilities.getFirstConstrainedYear(): local_tau = 1.0
-
-		# if scenario.is_revenue_neutral: # get_SMDAMAGE_temps_actual_and_taxed() uses this.
-		# 	with open(defaults_and_utilities.getOutputDirectory() + "SMDAMAGE " + defaults_and_utilities.experimentTag_to_file_name(scenario) + "_taxed_temps.pkl", "wb") as mypickle: pickle.dump(taxedTemperatureChange, mypickle)
-
-		# Save carbon, revenue, and actual temps to CSV.
-		# defaults_and_utilities.append_temperatures_to_csv(scenario, str(startyear) + ", SMDAMAGE Carbon " , {t: vpt['Carbon',t].varValue for t in BidPeriods})
-		# defaults_and_utilities.append_temperatures_to_csv(scenario, str(startyear) + ", SMDAMAGE yearly revenue ", yearlyrevenue)
-		# defaults_and_utilities.append_temperatures_to_csv(scenario, str(startyear) + ", SMDAMAGE actual temp ", {t: scenario.initial_temperature + temperatureChange[t].varValue for t in BidPeriods})
-		# if scenario.is_revenue_neutral: defaults_and_utilities.append_temperatures_to_csv(scenario, "SMDAMAGE taxed temp calibrated" if scenario.use_updated_Wpt else "SMDAMAGE taxed temp uncalibrated", {t: scenario.initial_temperature + taxedTemperatureChange[t].varValue for t in BidPeriods})
-
 	return scenario.initial_temperature + temperatureChange [float(int(max(AllBidPeriods)) - 2)].varValue
 # END run_SMDAMAGE_short_auctions().
+
+def old_taxed_temps(scenario, your_taxed_temps_filename): # retrieves previously saved solution vpt.
+	if not scenario.is_revenue_neutral: return {}
+	with open(defaults_and_utilities.getOutputDirectory() + your_taxed_temps_filename + "_taxed_temps.pkl", "rb") as mypickle:
+		taxed_temps = pickle.load(mypickle)
+	return {t: scenario.initial_temperature + taxed_temps[t].varValue for t in taxed_temps}
+# print(defaults_and_utilities.get_tree_schedule_carbon_removal(old_vpt(defaults_and_utilities.getExperimentTag(scenario) + ".pkl")))
+# exit()
 
 def get_SMDAMAGE_temps_actual_and_taxed(scenario):
 	SMDAMAGE_temperature = {}

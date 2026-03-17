@@ -12,12 +12,12 @@ def plot_temps_SMDAMAGE_and_Hector(scenario, taxedTemperatureChange, actualTempe
 		common_years = sorted(set(taxedTemperatureChange.keys()).intersection(set(actualTemperatureChange.keys())).intersection(set(Hector_temperature.keys())))
 		mplot.plot(common_years, [taxedTemperatureChange[year] for year in common_years], label="Taxed temperature change")
 		mplot.title("Compare temperature: Taxed vs Actual vs Hector")
-	
+
 	mplot.plot(common_years, [actualTemperatureChange[year] for year in common_years], label="SMDAMAGE temperature change")
 	mplot.plot(common_years, [Hector_temperature[year] for year in common_years], label="Hector temperature")
 	mplot.xlabel("Year")
 	mplot.ylabel("Temperature °C")
-	
+
 	mplot.legend()
 	mplot.savefig(getOutputDirectory() + "Temps_SMDAMAGE_and_Hector_" + experimentTag_to_file_name(scenario) + ".jpg")
 	# mplot.savefig(getOutputDirectory() + "Compare temps " + experimentTag_to_file_name(scenario) + ".svg")

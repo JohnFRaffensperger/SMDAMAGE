@@ -1,4 +1,7 @@
-# Part II. Getting pulse information from Hector. John F. Raffensperger, 2019.
+# Part I. Preliminaries, inputs, key parameters: create_database.py, database_interface.py, and defaults_and_utilities.py.
+# >>> Part II. Getting pulse information from Hector: hector_interface.py.
+# Part III. SMDAMAGE: "SMDAMAGE revenue neutral.py"
+# >>> Part IV. Running Hector on SMDAMAGE output. hector_interface.py.
 # =============================================================================================
 # This code changes the input to Hector, runs Hector, and reads the output,
 # with a pulse increase in each chemical, one chemical at a time, and then records the change in temperature.
@@ -24,6 +27,8 @@ import subprocess
 from math import log10, floor
 import defaults_and_utilities
 
+# This function is a property of your climate simulator, which must synchronize with the auction.
+# So if you want the auction to run every 6 months, you will have to simulate the resulting emissions and removal schedule on a 6 month basis.
 def getPeriodsPerYear():
 	return 1 # Not debugged for larger values. Probably dumb, as it imposes a need for floating indices, e.g., 2025.5. Depends on your climate simulator's ability to handle fractional years, i.e., getPulse().
 

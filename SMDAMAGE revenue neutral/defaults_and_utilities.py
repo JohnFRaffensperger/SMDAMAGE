@@ -1,3 +1,9 @@
+# >>> Part I. Preliminaries, inputs, key parameters: create_database.py, database_interface.py, and defaults_and_utilities.py.
+# Part II. Getting pulse information from Hector: hector_interface.py.
+# Part III. SMDAMAGE: "SMDAMAGE revenue neutral.py"
+# Part IV. Running Hector on SMDAMAGE output. hector_interface.py.
+# =============================================================================================
+
 import time # for timing the run.
 import csv # for CSV file operations
 import os # for file system operations
@@ -20,8 +26,8 @@ def getTreeTypes():	return ['Loblolly_pine_150', 'Ponderosa_pine_150', 'Black_wa
 def getUnits(): return {'Agriculture':'mtC', 'Black_walnut_150':'mhectares', 'Black_walnut_10':'mhectares', 'Black_walnut_55':'mhectares', 'C2F6':'kt', 'CF4':'kt', 'CH4':'mt', 'Carbon':'mtC', 'HFC125':'kt', 'HFC134a':'kt', 'HFC143a':'kt', 'Loblolly_pine_150':'mhectares', 'Loblolly_pine_10':'mhectares', 'Loblolly_pine_24':'mhectares', 'N2O':'mt', 'Ponderosa_pine_150':'mhectares', 'Ponderosa_pine_10':'mhectares', 'Ponderosa_pine_103':'mhectares', 'Seaweed':'mtC', 'SF6':'kt'}
 
 # Part 0. Key parameters. These parameters go to file names and headers. If you change something here, a function may be expecting the wrong filename.
-#                                               2125 <<<<<<<<<<<<<< Temperature constrained <<<<<<<<<<<<<<<<< 2306 
-#           2025 --------- bidding ------------------------------- 2275 
+#                                               2125 <<<<<<<<<<<<<< Temperature constrained <<<<<<<<<<<<<<<<< 2306
+#           2025 --------- bidding ------------------------------- 2275
 # Timeline: StartYear, StartYear+1, ..., FirstConstrainedYear, ..., StartYear + getNumber_of_bid_years(), ..., StartYear + PulseDataLength.
 #                             assert (tFirstConstrainedYear <= StartYear + getNumber_of_bid_years()).
 def getFirstConstrainedYear(): 		return 2125.0
@@ -30,7 +36,7 @@ def getStartYear(): 				return 2025.0 # First year of the auction schedule.
 def getPulseDataLength(): 			return 296 # Pulse data from Hector goes only 296 years. So raising this would understate later warming.
 
 def getModelPeriods(): return [float(getStartYear()) + float(t)/float(hector_interface.getPeriodsPerYear()) for t in range(hector_interface.getPeriodsPerYear()*getPulseDataLength())]
-def getBidPeriods(): return [float(getStartYear()) + float(t)/float(hector_interface.getPeriodsPerYear()) for t in range(hector_interface.getPeriodsPerYear()*getNumber_of_bid_years())] 
+def getBidPeriods(): return [float(getStartYear()) + float(t)/float(hector_interface.getPeriodsPerYear()) for t in range(hector_interface.getPeriodsPerYear()*getNumber_of_bid_years())]
 def getLastBidYear(): return getStartYear() + getNumber_of_bid_years() - 1.0  # Typically 100 years after first year, e.g., 2020.
 
 def inflate_2020_to_2025(): 		return 1.23 # Inflate prices from 2020 to 2025. From https://www.bls.gov/regions/mid-atlantic/data/consumerpriceindexhistorical_us_table.htm, I will multiply bids by $316/$257 = 1.23.
@@ -45,7 +51,7 @@ class Scenario(object):
 		self.tau = tau
 		self.is_removal_luc = is_removal_luc
 		self.use_updated_Wpt = use_updated_Wpt
-	def discount_rate(self, periods): return 1.0/(1.0 + self.discount_rate_base)**(periods) 	
+	def discount_rate(self, periods): return 1.0/(1.0 + self.discount_rate_base)**(periods)
 # your_sample_scenario = Scenario(comment = "Contracts", discount_rate = 0.03, initial_temperature = 971.24975, is_revenue_neutral = True, tau = 2.6, is_removal_luc = True, use_updated_Wpt = False)
 
 def getExperimentTag(scenario): # Used in file names and headers. discount_rate, initial_temperature, is_revenue_neutral, tau, is_removal_luc, use_updated_Wpt, comment
@@ -101,11 +107,11 @@ def get_Treetype_carbon_removal (Treetypes):
 def get_tree_schedule_carbon_removal (vpt): # Matches the spreadsheet convolution exactly.
 	Treetypes = getTreeTypes()
 	Treetype_carbon_removal = get_Treetype_carbon_removal(Treetypes)
-	
+
 	mtC_removed = {t: 0.0 for t in getModelPeriods()}
 	for u in getBidPeriods():
 		for tree in Treetypes:
-			for t in range(int(u), 1 + int(max(getModelPeriods()))): # 
+			for t in range(int(u), 1 + int(max(getModelPeriods()))): #
 				if t - u >= 156: break # don't run longer than the tree contract.
 				mtC_removed [t] += vpt[tree,u].varValue*Treetype_carbon_removal[tree][t - u]
 	return mtC_removed
