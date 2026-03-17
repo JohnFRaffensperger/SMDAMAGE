@@ -6,14 +6,17 @@
 # =============================================================================================
 # Part I. Preliminaries, inputs, key parameters: create_database.py, database_interface.py, and defaults_and_utilities.py.
 # Part II. Getting pulse information from Hector: hector_interface.py.
-# >>> Part III. SMDAMAGE: "SMDAMAGE revenue neutral.py". This is the main program. Experiments are at the bottom of this file.
-# Part IV. Running Hector on SMDAMAGE output: hector_interface.py.
+# >>> Part III. SMDAMAGE: "SMDAMAGE revenue neutral.py". This is the main program.
+# Part IV. Running Hector on SMDAMAGE output: hector_interface.py. Called from the experiments here.
+# >>> Parts V, VI, and VII: experiments are at the bottom of this file.
 # =============================================================================================
 
 import database_interface # reads the SMDAMAGE database.
 import defaults_and_utilities # Default parameters and utility functions
 import hector_interface # Hector pulse generation functions.
+import plotting_utils # Consolidated plotting functions
 import pickle # saving and retrieving solutions, especially the calibrated Wpt.
+import wpt_calibration # Wpt calibration functions
 from pulp import * #pulp.pulpTestAll() # to solve the linear programs.
 import time # for timing the run.
 
@@ -471,82 +474,82 @@ def get_SMDAMAGE_temps_actual_and_taxed(scenario):
 	return taxed_temps, SMDAMAGE_temperature
 
 # ========================================================================================
-# Part VI. Main. Run experiments with SMDAMAGE; convert SMDAMAGE output to Hector input, run Hector, and compare temperatures.
+# Part V. Main. Run experiments with SMDAMAGE; convert SMDAMAGE output to Hector input, run Hector, and compare temperatures.
 # ========================================================================================
 if __name__ == "__main__":
 	# Preliminary: get pulses from Hector.
 	# hector_interface.get_Pulses_from_Hector() # Output is Pulses_by_chemical.txt in the Hector directory. Move that to your /data/ directory.
 
-	# VI.A. Figure 1. SMDAMAGE uncalibrated. Uses the same tau for every year.
+	# V.A. Figure 1. SMDAMAGE uncalibrated. Uses the same tau for every year.
 	figure1 = defaults_and_utilities.Scenario(comment = "Fig1", discount_rate = 0.03, initial_temperature = 1400.0, tau = 2.5, is_revenue_neutral = True, is_removal_luc = False, use_updated_Wpt = False)
 	run_SMDAMAGE(figure1)
-	# hector_interface.run_Hector_with_SMDAMAGE_solution(figure1) # 3. Run Hector on SMDAMAGE output.
-	# plotting_utils.plot_temps_SMDAMAGE_and_Hector(figure1, *get_SMDAMAGE_temps_actual_and_taxed(figure1), hector_interface.get_Hector_temperature(figure1), defaults_and_utilities.getOutputDirectory, defaults_and_utilities.experimentTag_to_file_name)
-	# calibrated_initial_temperature = wpt_calibration.run_SMDAMAGE_fit_W(figure1) # Should return 971.24975.
+	hector_interface.run_Hector_with_SMDAMAGE_solution(figure1) # 3. Run Hector on SMDAMAGE output.
+	plotting_utils.plot_temps_SMDAMAGE_and_Hector(figure1, *get_SMDAMAGE_temps_actual_and_taxed(figure1), hector_interface.get_Hector_temperature(figure1), defaults_and_utilities.getOutputDirectory, defaults_and_utilities.experimentTag_to_file_name)
+	calibrated_initial_temperature = wpt_calibration.run_SMDAMAGE_fit_W(figure1) # Should return 971.24975.
 
-	# # VI.B. Figure 1. SMDAMAGE calibrated. discount_rate 0.03, initial_temperature 971.24975, tau 2.5, is_revenue_neutral True, is_removal_luc False, use_updated_Wpt False.
-	# figure1.initial_temperature = calibrated_initial_temperature
-	# figure1.use_updated_Wpt = True
-	# run_SMDAMAGE(figure1) #  Uses the same tau for every year.
-	# hector_interface.run_Hector_with_SMDAMAGE_solution(figure1) # What does the Hector trajectory look like with the calibrated SMDAMAGE solution?
-	# plotting_utils.plot_temps_SMDAMAGE_and_Hector(figure1, *get_SMDAMAGE_temps_actual_and_taxed(figure1), hector_interface.get_Hector_temperature(figure1), defaults_and_utilities.getOutputDirectory, defaults_and_utilities.experimentTag_to_file_name)
+	# V.B. Figure 1. SMDAMAGE calibrated. discount_rate 0.03, initial_temperature 971.24975, tau 2.5, is_revenue_neutral True, is_removal_luc False, use_updated_Wpt False.
+	figure1.initial_temperature = calibrated_initial_temperature
+	figure1.use_updated_Wpt = True
+	run_SMDAMAGE(figure1) #  Uses the same tau for every year.
+	hector_interface.run_Hector_with_SMDAMAGE_solution(figure1) # What does the Hector trajectory look like with the calibrated SMDAMAGE solution?
+	plotting_utils.plot_temps_SMDAMAGE_and_Hector(figure1, *get_SMDAMAGE_temps_actual_and_taxed(figure1), hector_interface.get_Hector_temperature(figure1), defaults_and_utilities.getOutputDirectory, defaults_and_utilities.experimentTag_to_file_name)
 
-	# # # # VI.C. Figure 2, robustness to discount rate: initial_temperature initial_temperature = 971.24975, is_revenue_neutral False, tau is irrelevant, is_removal_luc to False, use_updated_Wpt = True.
-	# calibrated_initial_temperature = 971.24975
-	# run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Fig2", discount_rate = 0.0, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = False, tau = 2.5, is_removal_luc = False, use_updated_Wpt = True))
-	# run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Fig2", discount_rate = 0.015, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = False, tau = 2.5, is_removal_luc = False, use_updated_Wpt = True))
-	# # Estimate 1 comes from the solution with discount_rate = 0.03.
-	# run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Fig2", discount_rate = 0.03, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = False, tau = 2.5, is_removal_luc = False, use_updated_Wpt = True))
-	# run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Fig2", discount_rate = 0.06, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = False, tau = 2.5, is_removal_luc = False, use_updated_Wpt = True))
+	# V.C. Figure 2, robustness to discount rate: initial_temperature initial_temperature = 971.24975, is_revenue_neutral False, tau is irrelevant, is_removal_luc to False, use_updated_Wpt = True.
+	calibrated_initial_temperature = 971.24975
+	run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Fig2", discount_rate = 0.0, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = False, tau = 2.5, is_removal_luc = False, use_updated_Wpt = True))
+	run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Fig2", discount_rate = 0.015, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = False, tau = 2.5, is_removal_luc = False, use_updated_Wpt = True))
+	# Estimate 1 comes from the solution with discount_rate = 0.03.
+	run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Fig2", discount_rate = 0.03, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = False, tau = 2.5, is_removal_luc = False, use_updated_Wpt = True))
+	run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Fig2", discount_rate = 0.06, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = False, tau = 2.5, is_removal_luc = False, use_updated_Wpt = True))
 
-	# # VI.D. Figures 3-5, revenue neutrality: discount_rate to 0.03, initial_temperature 971.24975, is_revenue_neutral True, tau ranges from 1.0 to 2.5, is_removal_luc False, use_updated_Wpt True.
-	# calibrated_initial_temperature = 971.24975
-	# # # Sequentially run SMDAMAGE with tau = 1, 1.5, 2.0, 2.5.
-	# run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Figs3-5", discount_rate = 0.03, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = True, tau = 1.0, is_removal_luc = False, use_updated_Wpt = True))
-	# run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Figs3-5", discount_rate = 0.03, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = True, tau = 1.5, is_removal_luc = False, use_updated_Wpt = True))
-	# run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Figs3-5", discount_rate = 0.03, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = True, tau = 2.0, is_removal_luc = False, use_updated_Wpt = True))
-	# run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Figs3-5", discount_rate = 0.03, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = True, tau = 2.5, is_removal_luc = False, use_updated_Wpt = True))
+	# V.D. Figures 3-5, revenue neutrality: discount_rate to 0.03, initial_temperature 971.24975, is_revenue_neutral True, tau ranges from 1.0 to 2.5, is_removal_luc False, use_updated_Wpt True.
+	calibrated_initial_temperature = 971.24975
+	# Sequentially run SMDAMAGE with tau = 1, 1.5, 2.0, 2.5.
+	run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Figs3-5", discount_rate = 0.03, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = True, tau = 1.0, is_removal_luc = False, use_updated_Wpt = True))
+	run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Figs3-5", discount_rate = 0.03, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = True, tau = 1.5, is_removal_luc = False, use_updated_Wpt = True))
+	run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Figs3-5", discount_rate = 0.03, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = True, tau = 2.0, is_removal_luc = False, use_updated_Wpt = True))
+	run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Figs3-5", discount_rate = 0.03, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = True, tau = 2.5, is_removal_luc = False, use_updated_Wpt = True))
 
-	# VI.E. # Estimate 2. Concluding paragraph after Figures 3-5.
-	# run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Figs3-5_after", discount_rate = 0.03, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = True, tau = 1.6, is_removal_luc = False, use_updated_Wpt = True))
+	# V.E. # Estimate 2. Concluding paragraph after Figures 3-5.
+	run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Figs3-5_after", discount_rate = 0.03, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = True, tau = 1.6, is_removal_luc = False, use_updated_Wpt = True))
 
-	# VII. Strength of contracts. (Figure 6 comes from the Pulse input data.)
+	# VI. Strength of contracts. (Figure 6 comes from the Pulse input data.)
 	# The base scenario is discount_rate to 0.03, initial_temperature 971.24975, is_revenue_neutral True, tau is 1.55, is_removal_luc to False, use_updated_Wpt = True, but with an earlier Wpt, so use False here.
 
-	# VII.A. Uncalibrated SMDAMAGE.
+	# VI.A. Uncalibrated SMDAMAGE.
 	# For the case of strong contracts, use discount_rate to 0.03, initial_temperature 971.24975, is_revenue_neutral True, tau is 2.4 (you can vary tau in repeat runs of SMDAMAGE to confirm), is_removal_luc to True, use_updated_Wpt = False.
-	# contracts_scenario = defaults_and_utilities.Scenario(comment = "Contracts", discount_rate = 0.03, initial_temperature = 971.24975, is_revenue_neutral = True, tau = 2.1, is_removal_luc = True, use_updated_Wpt = False)
-	# SMDAMAGE_final_temp = run_SMDAMAGE(contracts_scenario)
-	# hector_interface.run_Hector_with_SMDAMAGE_solution(contracts_scenario)
-	# plotting_utils.plot_temps_SMDAMAGE_and_Hector(contracts_scenario, *get_SMDAMAGE_temps_actual_and_taxed(contracts_scenario), hector_interface.get_Hector_temperature(contracts_scenario), defaults_and_utilities.getOutputDirectory, defaults_and_utilities.experimentTag_to_file_name)
+	contracts_scenario = defaults_and_utilities.Scenario(comment = "Contracts", discount_rate = 0.03, initial_temperature = 971.24975, is_revenue_neutral = True, tau = 2.1, is_removal_luc = True, use_updated_Wpt = False)
+	SMDAMAGE_final_temp = run_SMDAMAGE(contracts_scenario)
+	hector_interface.run_Hector_with_SMDAMAGE_solution(contracts_scenario)
+	plotting_utils.plot_temps_SMDAMAGE_and_Hector(contracts_scenario, *get_SMDAMAGE_temps_actual_and_taxed(contracts_scenario), hector_interface.get_Hector_temperature(contracts_scenario), defaults_and_utilities.getOutputDirectory, defaults_and_utilities.experimentTag_to_file_name)
 
-	# # # # VII.B. Calibrate W.
-	# calibrated_initial_temperature = wpt_calibration.run_SMDAMAGE_fit_W(contracts_scenario)
+	# VI.B. Calibrate W.
+	calibrated_initial_temperature = wpt_calibration.run_SMDAMAGE_fit_W(contracts_scenario)
 
-	# # # # VII.C. Calibrated SMDAMAGE.
-	# contracts_scenario.use_updated_Wpt = True
-	# contracts_scenario.initial_temperature = calibrated_initial_temperature # 1255.5764
-	# SMDAMAGE_final_temp = run_SMDAMAGE(contracts_scenario)
+	# VI.C. Calibrated SMDAMAGE.
+	contracts_scenario.use_updated_Wpt = True
+	contracts_scenario.initial_temperature = calibrated_initial_temperature # 1255.5764
+	SMDAMAGE_final_temp = run_SMDAMAGE(contracts_scenario)
 
-	# hector_interface.run_Hector_with_SMDAMAGE_solution(contracts_scenario)
-	# plotting_utils.plot_temps_SMDAMAGE_and_Hector(contracts_scenario, *get_SMDAMAGE_temps_actual_and_taxed(contracts_scenario), hector_interface.get_Hector_temperature(contracts_scenario), defaults_and_utilities.getOutputDirectory, defaults_and_utilities.experimentTag_to_file_name)
+	hector_interface.run_Hector_with_SMDAMAGE_solution(contracts_scenario)
+	plotting_utils.plot_temps_SMDAMAGE_and_Hector(contracts_scenario, *get_SMDAMAGE_temps_actual_and_taxed(contracts_scenario), hector_interface.get_Hector_temperature(contracts_scenario), defaults_and_utilities.getOutputDirectory, defaults_and_utilities.experimentTag_to_file_name)
 
-	# VIII. Short auctions, 2 years at a time.
-	# VIII.A. Calibrate with a long-term model.
-	# Short_auctions_scenario = defaults_and_utilities.Scenario(comment = "Short auctions", discount_rate = 0.03, initial_temperature = 971.24975, tau = 1.5, is_revenue_neutral = True, is_removal_luc = False, use_updated_Wpt = False)
-	# # run_SMDAMAGE(Short_auctions_scenario) # A long auction for calibrating the short auctions.
-	# # hector_interface.run_Hector_with_SMDAMAGE_solution(Short_auctions_scenario) # 3. Run Hector on SMDAMAGE output.
+	# VII. Short auctions, 2 years at a time.
+	# VII.A. Calibrate with a long-term model.
+	Short_auctions_scenario = defaults_and_utilities.Scenario(comment = "Short auctions", discount_rate = 0.03, initial_temperature = 971.24975, tau = 1.5, is_revenue_neutral = True, is_removal_luc = False, use_updated_Wpt = False)
+	run_SMDAMAGE(Short_auctions_scenario) # A long auction for calibrating the short auctions.
+	hector_interface.run_Hector_with_SMDAMAGE_solution(Short_auctions_scenario) # 3. Run Hector on SMDAMAGE output.
 
-	# # calibrated_initial_temperature = wpt_calibration.run_SMDAMAGE_fit_W(Short_auctions_scenario) # Should return 895.95254.
+	calibrated_initial_temperature = wpt_calibration.run_SMDAMAGE_fit_W(Short_auctions_scenario) # Should return 895.95254.
 
-	# # VIII.B. Run the short auctions.
-	# Short_auctions_scenario.initial_temperature = 895.95254 # calibrated_initial_temperature
-	# Short_auctions_scenario.use_updated_Wpt = True # Use this updated_Wpt for the short auctions.
-	# run_SMDAMAGE_short_auctions(Short_auctions_scenario) # Results in excess cooling. Hence the search for tau by year.
+	# VII.B. Run the short auctions.
+	Short_auctions_scenario.initial_temperature = 895.95254 # calibrated_initial_temperature
+	Short_auctions_scenario.use_updated_Wpt = True # Use this updated_Wpt for the short auctions.
+	run_SMDAMAGE_short_auctions(Short_auctions_scenario) # Results in excess cooling. Hence the search for tau by year.
 
-	# # Search for tau. Starts with tau = 1.7 for every constrained year, then uses subgradient optimization to choose a tau for each year.
-	# tau_search = defaults_and_utilities.Scenario(comment = "Tau search", discount_rate = 0.03, initial_temperature = 971.24975, tau = 1.7, is_revenue_neutral = True, is_removal_luc = False, use_updated_Wpt = True)
-	# run_SMDAMAGE_for_tau (tau_search) # Repeated solution of SMDAMAGE with subgradient optimization on tau.
+	# Search for tau. Starts with tau = 1.7 for every constrained year, then uses subgradient optimization to choose a tau for each year.
+	tau_search = defaults_and_utilities.Scenario(comment = "Tau search", discount_rate = 0.03, initial_temperature = 971.24975, tau = 1.7, is_revenue_neutral = True, is_removal_luc = False, use_updated_Wpt = True)
+	run_SMDAMAGE_for_tau (tau_search) # Repeated solution of SMDAMAGE with subgradient optimization on tau.
 
 	# wpt_calibration.write_fitted_Wpt_to_csv() # if you want to analyze the Wpt values in Excel.
 	import winsound
