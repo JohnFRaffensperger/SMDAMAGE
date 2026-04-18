@@ -10,9 +10,10 @@ Database interface module for SMDAMAGE. Made by Claude with JFR's guidance.
 import sqlite3
 import os
 
+# Import hector_interface for getPeriodsPerYear (circular import avoided by late import in getPulse)
 # Get the directory where this script is located
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_NAME = os.path.join(SCRIPT_DIR, "smdamage_data.db")  # Database in same directory as script
+DB_NAME = os.path.join(os.path.dirname(SCRIPT_DIR), "Data", "smdamage_data.db")  # Database in Data directory
 
 def database_exists(): return os.path.exists(DB_NAME)
 
@@ -68,7 +69,9 @@ def get_warming_factors(hector_name): # For forestry, you must do the convolutio
 	results = do_query("SELECT emission_factor, hector_units, * FROM warming_factors WHERE hector_name = ?", (hector_name,))
 
 	result = results[0]
-	data_values = list(result[2:])  # All year columns as a list
+	# Query returns: (emission_factor, hector_units, id, hector_name, emission_factor, hector_units, year_001, year_002, ..., year_296)
+	# We want only the year columns starting at index 6
+	data_values = list(result[6:])  # All year columns as a list, skipping duplicate metadata
 	# You should normalize data_values by emission_factor: data_values = [val / emission_factor for val in data_values].
 	return {'emission_factor': result[0], 'hector_units': result[1], 'data_values': data_values}
 # print(get_warming_factors('ffi_emissions'))
@@ -80,3 +83,33 @@ def show_database_info():
 		result = do_query(f"SELECT COUNT(*) FROM {table[0]}")
 		print(f"{table[0]}: {result[0][0]} records")
 # show_database_info()
+
+def getPulse(): # Retrieves the marginal change in temperature in each year after a pulse emission from the database.
+	"""
+	Load warming factors from smdamage_data.db and return as a Pulse dictionary.
+	Format: Pulse[chemical] = [emission_factor, warming1, warming2, ..., warming_296]
+	Each warming value is repeated according to getPeriodsPerYear() for sub-annual periods.
+	"""
+	from hector_interface import getPeriodsPerYear  # Import here to avoid circular dependency
+
+	Pulse = {}  # [Pulseqty, warming1, warming2, warming3,...]
+	hector_names = get_hector_names()
+
+	for hector_name in hector_names:
+		warming_data = get_warming_factors(hector_name)
+		emission_factor = warming_data['emission_factor']
+		data_values = warming_data['data_values']
+
+		# Remove the emission_factor and hector_units from data_values to get just the warming values
+		# get_warming_factors returns: {'emission_factor': result[0], 'hector_units': result[1], 'data_values': data_values}
+		# where data_values = list(result[2:]) = all year columns
+
+		# Remove 'ffi_emissions' suffix to match the key format of the original Pulse dictionary
+		chemical_key = hector_name.replace('_emissions', '')
+
+		# Build the pulse list: [emission_factor] + warming values repeated for each period per year
+		pulse_list = [emission_factor] + [float(warming) for warming in data_values for _ in range(getPeriodsPerYear())]
+		Pulse[chemical_key] = pulse_list
+
+	return Pulse
+

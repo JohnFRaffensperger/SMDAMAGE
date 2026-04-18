@@ -263,18 +263,19 @@ def get_Hector_temperature(scenario):
 			if line[4] == 'Tgav' and line[6].strip() == 'degC': temperature[float(line[0])] = 1000.0*float(line[5])
 	return temperature
 
-def getPulse(): # Retrieves the marginal change in temperature in each year after a pulse emission.
-	Pulse = {} # [Pulseqty, warming1, warming2, warming3,...]
-	# Get warming effects for 'C2F6', 'CF4', 'CH4', 'Carbon', HFC125', 'HFC134a', 'HFC143a', 'N2O', 'SF6', 'SO2'.
-	with open('./data/Calibrated_pulses_by_chemical_2025.txt', 'r') as pulsefile:
-		for line in pulsefile: # Each line looks like: ffi_emissions,13.931549999999998,GtC/yr,0.0,...
-			chempulse = line.split(",") # Below, we're copying the annual warming for each period in the year.
-			# GetPeriodsPerYear() is important because if you have more than one period per year, you need to copy the warming effect for each period in the year. For example, if you have 2 periods per year, you need to interpolate the warming effect for each period.
-			# Hector may have the ability to simulate climate in sub-annual periods, e.g., 2025.0, 2025.5, 2026.0, etc. If so, we would use the warming effect for each period in the year, not just once per year.
-			Pulse[chempulse[0].replace('_emissions','')] = [float(chempulse[1])] + [float(warming) for warming in chempulse[3:] for i in range(getPeriodsPerYear())]
-			# At this point, Pulse['ffi'] = [7.971, -0.0, 0.00227, 0.006247, 0.009098, ... ]. The first element is the impulse size used in Hector to find a temperature change.
-			# We have to normalize this, so Wput2_dict [(p, t0)] = Pulse[p1][t0+1]/Pulse[p1][0]
-	return Pulse
+# DEPRECATED: Use database_interface.getPulse() instead
+# def getPulse(): # Retrieves the marginal change in temperature in each year after a pulse emission.
+# 	Pulse = {} # [Pulseqty, warming1, warming2, warming3,...]
+# 	# Get warming effects for 'C2F6', 'CF4', 'CH4', 'Carbon', HFC125', 'HFC134a', 'HFC143a', 'N2O', 'SF6', 'SO2'.
+# 	with open('./data/Calibrated_pulses_by_chemical_2025.txt', 'r') as pulsefile:
+# 		for line in pulsefile: # Each line looks like: ffi_emissions,13.931549999999998,GtC/yr,0.0,...
+# 			chempulse = line.split(",") # Below, we're copying the annual warming for each period in the year.
+# 			# GetPeriodsPerYear() is important because if you have more than one period per year, you need to copy the warming effect for each period in the year. For example, if you have 2 periods per year, you need to interpolate the warming effect for each period.
+# 			# Hector may have the ability to simulate climate in sub-annual periods, e.g., 2025.0, 2025.5, 2026.0, etc. If so, we would use the warming effect for each period in the year, not just once per year.
+# 			Pulse[chempulse[0].replace('_emissions','')] = [float(chempulse[1])] + [float(warming) for warming in chempulse[3:] for i in range(getPeriodsPerYear())]
+# 			# At this point, Pulse['ffi'] = [7.971, -0.0, 0.00227, 0.006247, 0.009098, ... ]. The first element is the impulse size used in Hector to find a temperature change.
+# 			# We have to normalize this, so Wput2_dict [(p, t0)] = Pulse[p1][t0+1]/Pulse[p1][0]
+# 	return Pulse
 
 
 

@@ -39,6 +39,10 @@ def getModelPeriods(): return [float(getStartYear()) + float(t)/float(hector_int
 def getBidPeriods(): return [float(getStartYear()) + float(t)/float(hector_interface.getPeriodsPerYear()) for t in range(hector_interface.getPeriodsPerYear()*getNumber_of_bid_years())]
 def getLastBidYear(): return getStartYear() + getNumber_of_bid_years() - 1.0  # Typically 100 years after first year, e.g., 2020.
 
+# Set this if Agriculture is expressed in mtC but should also consume land in land-balance constraints.
+# Units: mtC per million hectares. Keep 0.0 to ignore agriculture in hectare constraints.
+def getAgricultureMtCPerMhectare(): return 0.0
+
 def inflate_2020_to_2025(): 		return 1.23 # Inflate prices from 2020 to 2025. From https://www.bls.gov/regions/mid-atlantic/data/consumerpriceindexhistorical_us_table.htm, I will multiply bids by $316/$257 = 1.23.
 def dateTimeString(): return time.strftime("%Y%m%d%H%M", time.localtime())
 
