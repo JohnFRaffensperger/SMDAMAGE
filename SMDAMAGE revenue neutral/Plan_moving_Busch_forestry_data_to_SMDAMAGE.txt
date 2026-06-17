@@ -1,0 +1,104 @@
+Plan: replace legacy forestry bid inputs with Busch2024 clustered forestry bidders
+
+Source for forestry bid data
+- Output/Databases/Busch2024_to_SMDAMAGE.sqlite
+	- Location in Busch project: C:\Users\johnr\Documents\Work documents\2 Research\Global warming\Numerical Simulation\Busch2024\Output\Databases\Busch2024_to_SMDAMAGE.sqlite. Make this configurable via parameter/env var.
+  - Undiscounted_dta_output (pixel area, rotation year, cluster, per-ha cost inputs), for bidder land availability.
+  - carbon_removal_schedules for bidder-year carbon removal schedules.
+  - forestry_bid_curves, already bucketed bid steps by rotation, cluster, and discount_rate. Select the right column for the chosen discount rate in SMDAMAGE.
+* - Path precedence rule: CLI argument first, then environment variable, then default Busch absolute path.
+
+Goal
+- Replace existing forestry data in SMDAMAGE with data from Busch2024_to_SMDAMAGE.sqlite.
+	- Use forestry_bid_curves as the default bid-step source (already bucketed by rotation_year, cluster_index, discount_rate).
+- Update the SMDAMAGE model in "SMDAMAGE revenue neutral.py" from one aggregate forestry land-cap constraint (all mhectares bidders pooled together)
+	to bidder-specific static area caps with time-varying active contracts, based on area from Undiscounted_dta_output.
+
+Architecture decision
+- Runtime database remains Data/smdamage_data.db.
+- create_database.py is the integration boundary: it imports/transforms forestry data from Output/Databases/Busch2024_to_SMDAMAGE.sqlite into Data/smdamage_data.db.
+- database_interface.py continues to read only from Data/smdamage_data.db at runtime.
+* Primary implementation path is direct import from Busch SQLite into Data/smdamage_data.db; no intermediate forestry files are required for runtime.
+* Direct-import forestry load should run in one database transaction and roll back on any validation failure.
+- Remove/create_database.py forestry assumptions:
+	- create_database.py still hardcodes forestry as a multi-column CSV layout with fixed column indices.
+	- Data/Forestry_bid_steps.csv is still a wide file with one shared quantity column and fixed forestry price columns.
+	- Replace the legacy 9-column forestry inputs with bidder-specific forestry data keyed by (rotation_year, cluster_index).
+
+1. Forestry bidder metadata
+Columns: bidder_name, rotation_year, cluster_index, contract_years, available_area_mhectares, hector_name, description
+- Unique key: bidder_name
+	- Required non-null: bidder_name, rotation_year, cluster_index, contract_years, available_area_mhectares
+	- Domain checks: rotation_year > 0, contract_years = rotation_year, available_area_mhectares >= 0
+
+2. Forestry bid steps data
+Columns: bidder_name, bid_step, price_per_hectare, quantity_mhectares
+- Unique key: (bidder_name, bid_step)
+- Required non-null: bidder_name, bid_step, price_per_hectare, quantity_mhectares
+- Domain checks: bid_step >= 1, quantity_mhectares >= 0
+
+3. Forestry carbon removal data
+Columns: bidder_name, year, tons_per_hectare_per_year
+- Unique key: (bidder_name, year)
+- Required non-null: bidder_name, year, tons_per_hectare_per_year
+- Domain checks: year integer in modeled horizon, tons_per_hectare_per_year numeric
+
+Naming and units
+- Stable bidder key and bidder_name format: Forestry_r{rotation:02d}_c{cluster:02d}
+* contract_years maps directly from rotation_year; use contract_years in SMDAMAGE naming.
+- available_area_mhectares = area_ha / 1_000_000
+
+Source mapping from Busch SQLite
+
+A. Bidder identities and area
+- Build one bidder per (rotation_year, cluster_index).
+- Preferred area source: sum(area_ha) from Undiscounted_dta_output grouped by the pair.
+- Metadata: contract_years = rotation_year, available_area_mhectares = sum(area_ha) / 1_000_000.
+
+B. Carbon removal schedules
+- Source from carbon_removal_schedules by (rotation_year, cluster_index, year).
+- Emit one row per bidder-year as tons_per_hectare_per_year (tC_per_ha_per_year from source).
+* Area quantities can diverge between Undiscounted_dta_output and forestry_bid_curves; apply thresholded validation: log warning when abs(delta_area_ha) <= 1e-6 * max(1, reference_area_ha), and fail import when above threshold.
+* Normalize selected_rotation_year_int and selected_rotation_year with one rule: rotation_year = int(round(value)); assert equality after normalization for all joined forestry records.
+
+C. Bid steps
+- First pass: source from forestry_bid_curves filtered to one discount_rate (default 0.03).
+- Required source fields in forestry_bid_curves mapping (exact names):
+	- selected_rotation_year_int -> rotation_year
+	- cluster_index
+	- discount_rate
+	- bucket_id -> bid_step ordering
+	- area_ha_sum -> quantity_mhectares via / 1_000_000
+	- npv_column -> price_per_hectare source-column selector
+- Required source fields in Undiscounted_dta_output used for npv_column validation:
+	- NPV_0_pct_per_ha
+	- NPV_015_pct_per_ha
+	- NPV_03_pct_per_ha
+	- NPV_06_pct_per_ha
+- Discount-rate mapping requirement:
+	- 0.0 -> NPV_0_pct_per_ha
+	- 0.015 -> NPV_015_pct_per_ha
+	- 0.03 -> NPV_03_pct_per_ha
+	- 0.06 -> NPV_06_pct_per_ha
+	- Exporter must assert that forestry_bid_curves.npv_column matches the expected mapped value for selected discount_rate.
+- Bid-step ordering:
+	* Authoritative step order is bucket_id ascending within (selected_rotation_year_int, cluster_index, discount_rate).
+	* When deterministic tie-breakers are required, sort by npv_min_per_ha, then npv_max_per_ha, then area_ha_sum.
+	* Price is validated as nondecreasing across ordered steps; if violated, fail import.
+	- quantity_mhectares is incremental per step: area_ha_sum / 1_000_000.
+
+SMDAMAGE code changes
+- In create_database.py, remove hardcoded forestry wide-file configuration based on Forestry_bid_steps.csv.
+- In create_database.py, build one importer pipeline that writes bidders, bids, and forestry_removal into smdamage_data.db.
+
+Done when
+- create_database.py populates Data/smdamage_data.db with data on bidders, bids, forestry_removal.
+- Concrete idempotency check: run create_database twice, then verify identical row counts and deterministic table hashes over key-sorted rows for bidders, bids, and forestry_removal.
+* No orphan bidder keys across bidders, bids, and forestry_removal.
+* Bidder-name sets are identical across bidders, bids, and forestry_removal.
+- Units are consistent: quantity_mhectares in mhectares and tons_per_hectare_per_year in tons/ha/year.
+- For each bidder: nonnegative quantity and nondecreasing bid-step cost.
+
+* Phase 2 validation (smoke-run phase)
+* - Replace aggregate forestry land cap with bidder-specific caps: sum of vpt[f,u] over active u <= available_area_mhectares[f], where u <= t < u + contract_years[f].
+* - One smoke run of SMDAMAGE with forestry enabled completes successfully.
