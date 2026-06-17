@@ -45,8 +45,11 @@ def get_bidders():
 # return do_query("SELECT * FROM bidders ORDER BY bidder collate nocase")
 # print(get_bidders())
 
-def get_bids(bidder_name):
-	return do_query("SELECT price_per_unit, quantity_units FROM bids WHERE bidder = ? ORDER BY id", (bidder_name,))
+def get_bids(bidder_name, discount_rate=None):
+	if discount_rate is None:
+		return do_query("SELECT price_per_unit, quantity_units FROM bids WHERE bidder = ? ORDER BY id", (bidder_name,))
+	return do_query("SELECT price_per_unit, quantity_units FROM bids WHERE bidder = ? AND (discount_rate IS NULL OR ABS(discount_rate - ?) < 1e-12) ORDER BY id",
+		(bidder_name, discount_rate),)
 # ag_bids = get_bids('Agriculture')
 # for i, (price, qty) in enumerate(ag_bids[:3]): print(f"  • Bid {i+1}: ${price:.2f}/MgtonC, {qty:.2f} MgtonC")
 

@@ -21,14 +21,16 @@ Create SQLite database for SMDAMAGE CSV data. Produced by Claude with JFR's guid
 
 import csv
 import os
+import sqlite3
 import sys
 
 # sys.path.append("..")  # Add parent directory to find database_interface.py
-from database_interface import database_exists, do_insert, do_query, show_database_info
+from database_interface import DB_NAME, database_exists, do_insert, do_query, show_database_info
 
 DATA_DIR = "../Data" # Holds all the CSV files with bidder and warming factor data. Make sure this directory exists and contains the necessary CSV files before running this script.
 CHEMICAL_PULSES_FILE = 'Calibrated_pulses_by_chemical_2025.txt' # Make this with Hector.
-FORESTRY_SEQUESTRATION_FILE = 'Forestry_sequestration.csv'
+BUSCH_DB_DEFAULT = r"C:\Users\johnr\Documents\Work documents\2 Research\Global warming\Numerical Simulation\Busch2024\Output\Databases\Busch2024_to_SMDAMAGE.sqlite"
+BUSCH_DB_ENV_VAR = "BUSCH_SMDAMAGE_SQLITE"
 
 # Simple bidders can be loaded directly with add_bidder
 SIMPLE_BIDDERS = [
@@ -51,21 +53,6 @@ MULTI_COLUMN_BIDDERS = {'chemicals': {
 			{'name': 'HFC143a', 'price_col': 8, 'qty_col': 9, 'bidder_class': 'Emitter', 'units': 'kt', 'contract_years': 1, 'hector_name': 'HFC143a_emissions'},
 			{'name': 'SF6', 'price_col': 10, 'qty_col': 11, 'bidder_class': 'Emitter', 'units': 'kt', 'contract_years': 1, 'hector_name': 'SF6_emissions'}
 		]
-	},
-	'forestry': {
-		'csv_filename': 'Forestry_bid_steps.csv',
-		'shared_quantity_col': 0,  # All forestry bidders share quantity from column 0
-		'bidders': [
-			{'name': 'Loblolly_pine_150', 'price_col': 1, 'qty_col': None, 'bidder_class': 'Remover', 'units': 'mhectares', 'contract_years': 150, 'hector_name': 'ffi_emissions'},
-			{'name': 'Ponderosa_pine_150', 'price_col': 2, 'qty_col': None, 'bidder_class': 'Remover', 'units': 'mhectares', 'contract_years': 150, 'hector_name': 'ffi_emissions'},
-			{'name': 'Black_walnut_150', 'price_col': 3, 'qty_col': None, 'bidder_class': 'Remover', 'units': 'mhectares', 'contract_years': 150, 'hector_name': 'ffi_emissions'},
-			{'name': 'Loblolly_pine_10', 'price_col': 4, 'qty_col': None, 'bidder_class': 'Remover', 'units': 'mhectares', 'contract_years': 10, 'hector_name': 'ffi_emissions'},
-			{'name': 'Ponderosa_pine_10', 'price_col': 5, 'qty_col': None, 'bidder_class': 'Remover', 'units': 'mhectares', 'contract_years': 10, 'hector_name': 'ffi_emissions'},
-			{'name': 'Black_walnut_10', 'price_col': 6, 'qty_col': None, 'bidder_class': 'Remover', 'units': 'mhectares', 'contract_years': 10, 'hector_name': 'ffi_emissions'},
-			{'name': 'Loblolly_pine_24', 'price_col': 7, 'qty_col': None, 'bidder_class': 'Remover', 'units': 'mhectares', 'contract_years': 24, 'hector_name': 'ffi_emissions'},
-			{'name': 'Ponderosa_pine_103', 'price_col': 8, 'qty_col': None, 'bidder_class': 'Remover', 'units': 'mhectares', 'contract_years': 103, 'hector_name': 'ffi_emissions'},
-			{'name': 'Black_walnut_55', 'price_col': 9, 'qty_col': None, 'bidder_class': 'Remover', 'units': 'mhectares', 'contract_years': 55, 'hector_name': 'ffi_emissions'}
-		]
 	}
 }
 
@@ -75,6 +62,9 @@ def create_database():
 	if database_exists():
 		print(f"❌ Database already exists. Delete it first or use a different name.")
 		sys.exit(1)
+
+	# Bootstrap an empty SQLite file so database_interface.do_query can run CREATE statements.
+	sqlite3.connect(DB_NAME).close()
 
 	# Warming data
 	data_columns = ', '.join([f'year_{i:03d} REAL' for i in range(1, 297)]) # Warming factors table, 296 data values (year_001 to year_296).
@@ -90,20 +80,25 @@ def create_database():
 	do_query('CREATE INDEX IF NOT EXISTS idx_bidders_hector_name ON bidders(hector_name)')
 
 	# Bids
-	do_query('''CREATE TABLE IF NOT EXISTS bids (id INTEGER PRIMARY KEY AUTOINCREMENT, bidder TEXT, price_per_unit REAL, quantity_units REAL, FOREIGN KEY (bidder) REFERENCES bidders(bidder))''')
+	do_query('''CREATE TABLE IF NOT EXISTS bids (id INTEGER PRIMARY KEY AUTOINCREMENT, bidder TEXT, price_per_unit REAL, quantity_units REAL, discount_rate REAL, FOREIGN KEY (bidder) REFERENCES bidders(bidder))''')
 	do_query('CREATE INDEX IF NOT EXISTS idx_bids_bidder ON bids(bidder)')
 	do_query('CREATE INDEX IF NOT EXISTS idx_bids_price ON bids(price_per_unit)')
+	do_query('CREATE INDEX IF NOT EXISTS idx_bids_discount_rate ON bids(discount_rate)')
 
 	load_simple_bidders()
 	load_multi_column_bidders('chemicals')
-	load_multi_column_bidders('forestry')
 
 	# Forestry carbon removal.
 	do_query('''CREATE TABLE IF NOT EXISTS forestry_removal (id INTEGER PRIMARY KEY AUTOINCREMENT, bidder TEXT NOT NULL, year INTEGER NOT NULL, tons_per_hectare_per_year REAL NOT NULL)''')
 	do_query('CREATE INDEX IF NOT EXISTS idx_forestry_seq_bidder ON forestry_removal(bidder)')
 	do_query('CREATE INDEX IF NOT EXISTS idx_forestry_seq_year ON forestry_removal(year)')
 	do_query('CREATE INDEX IF NOT EXISTS idx_forestry_seq_bidder_year ON forestry_removal(bidder, year)')
-	load_forestry_removal()
+
+	# Forestry bidder metadata: explicit max area and cluster mapping.
+	do_query('''CREATE TABLE IF NOT EXISTS forestry_bidder_metadata (id INTEGER PRIMARY KEY AUTOINCREMENT, bidder TEXT UNIQUE NOT NULL, rotation_year INTEGER NOT NULL, cluster_index INTEGER NOT NULL, available_area_mhectares REAL NOT NULL, FOREIGN KEY (bidder) REFERENCES bidders(bidder))''')
+	do_query('CREATE INDEX IF NOT EXISTS idx_forestry_meta_bidder ON forestry_bidder_metadata(bidder)')
+	do_query('CREATE INDEX IF NOT EXISTS idx_forestry_meta_rotation_cluster ON forestry_bidder_metadata(rotation_year, cluster_index)')
+	load_forestry_from_busch_sqlite()
 
 	# Create indexes for faster queries
 	print(f"Database created and populated with data.")
@@ -136,7 +131,7 @@ def add_bidder_and_bids(bidder_name, csv_filename, bidder_class='Emitter', units
 			if len(row) >= 2:
 				price_per_unit = float(row[0])
 				quantity_units = float(row[1])
-				do_insert("INSERT INTO bids (bidder, price_per_unit, quantity_units) VALUES (?, ?, ?)", (bidder_name, price_per_unit, quantity_units))
+				do_insert("INSERT INTO bids (bidder, price_per_unit, quantity_units, discount_rate) VALUES (?, ?, ?, ?)", (bidder_name, price_per_unit, quantity_units, None))
 				total_price += price_per_unit
 				bid_count += 1
 		if total_price > 0 and bidder_class.lower() == 'remover': print(f"Warning: you classified Bidder '{bidder_name}' as a 'Remover' but their prices are positive, total {total_price:.2f}. Check the CSV data.")
@@ -216,35 +211,115 @@ def load_chemical_pulses():
 						placeholders = ', '.join(['?' for _ in range(296)])
 						do_insert(f'''INSERT INTO warming_factors (hector_name, emission_factor, hector_units, {year_columns}) VALUES (?, ?, ?, {placeholders})''', (chemical_name, emission_factor, units, *data_values))
 		print(f"Loaded {CHEMICAL_PULSES_FILE} (decomposed into individual columns)")
-	except FileNotFoundError:
-		print(f"⚠ {CHEMICAL_PULSES_FILE} not found")
+	except FileNotFoundError: print(f"⚠ {CHEMICAL_PULSES_FILE} not found")
 
-def load_forestry_removal():
-	"""Load forestry removal data from Forestry_sequestration.csv"""
+def bidder_name_for(rotation_year, cluster_index): return f"Forestry_r{int(rotation_year):02d}_c{int(cluster_index):02d}"
+
+def get_busch_db_path(): return os.getenv(BUSCH_DB_ENV_VAR, BUSCH_DB_DEFAULT)
+
+def load_forestry_from_busch_sqlite():
+	"""Direct forestry import pipeline from Busch SQLite into bidders, bids, and forestry_removal."""
+	zero_tolerance = 1e-12
+	busch_db_path = get_busch_db_path()
+	if not os.path.exists(busch_db_path):
+		print(f"⚠ Busch SQLite not found: {busch_db_path}")
+		print(f"   Set {BUSCH_DB_ENV_VAR} to the correct .sqlite path to load forestry data.")
+		return
+
+	script_dir = os.path.dirname(os.path.abspath(__file__))
+	target_db_path = os.path.normpath(os.path.join(script_dir, '..', 'Data', 'smdamage_data.db'))
+
+	source_conn = sqlite3.connect(busch_db_path)
+	source_cur = source_conn.cursor()
+	target_conn = sqlite3.connect(target_db_path)
+	target_cur = target_conn.cursor()
 	try:
-		# Build column mappings from existing forestry configuration
-		forestry_bidders = MULTI_COLUMN_BIDDERS['forestry']['bidders']
-		column_mappings = []
-		for bidder in forestry_bidders:
-			# Map price_col to the sequestration data column (same column index)
-			col_idx = bidder['price_col']
-			bidder_name = bidder['name']
-			description = f"{bidder_name.replace('_', ' ')} {bidder['contract_years']}yr"
-			column_mappings.append((col_idx, bidder_name, description))
+		target_cur.execute('BEGIN')
+		print("Forestry import: transaction started")
 
-		with open(os.path.join(DATA_DIR, FORESTRY_SEQUESTRATION_FILE), 'r') as f:
-			reader = csv.reader(f)
-			next(reader)  # Skip header
+		# 1) Insert forestry bidders using bidder-specific area and contract years.
+		# Use carbon_removal_schedules first because it is much smaller and avoids long scans on Undiscounted_dta_output.
+		print("Forestry import: loading bidder areas from carbon_removal_schedules")
+		bidder_rows = source_cur.execute('''SELECT CAST(ROUND(selected_rotation_year) AS INTEGER), cluster_index, MAX(total_area_ha) FROM carbon_removal_schedules
+			GROUP BY CAST(ROUND(selected_rotation_year) AS INTEGER), cluster_index ORDER BY CAST(ROUND(selected_rotation_year) AS INTEGER), cluster_index''').fetchall()
 
-			for row in reader:
-				year = int(row[0])
-				# Transform wide format to long format - one row per bidder per year
-				for col_idx, bidder_name, description in column_mappings:
-					tons_per_hectare = float(row[col_idx])
-					do_insert('''INSERT INTO forestry_removal (bidder, year, tons_per_hectare_per_year) VALUES (?, ?, ?)''', (bidder_name, year, tons_per_hectare))
-		print(f"Loaded {FORESTRY_SEQUESTRATION_FILE} (normalized to long format into forestry_removal table)")
-	except FileNotFoundError:
-		print(f"⚠ {FORESTRY_SEQUESTRATION_FILE} not found")
+		if not bidder_rows:
+			print("Forestry import: no area rows in carbon_removal_schedules, falling back to Undiscounted_dta_output")
+			bidder_rows = source_cur.execute('''SELECT selected_rotation_year_int, cluster_index, SUM(area_ha) FROM Undiscounted_dta_output
+				GROUP BY selected_rotation_year_int, cluster_index ORDER BY selected_rotation_year_int, cluster_index''').fetchall()
+
+		insert_bidders = []
+		insert_bidder_metadata = []
+		for rotation_year, cluster_index, area_ha_sum in bidder_rows:
+			bidder_name = bidder_name_for(rotation_year, cluster_index)
+			description = f"Forestry clustered bidder r{int(rotation_year)} c{int(cluster_index)}"
+			insert_bidders.append((bidder_name, 'Remover', 'mhectares', int(rotation_year), 'ffi_emissions', description))
+			insert_bidder_metadata.append((bidder_name, int(rotation_year), int(cluster_index), float(area_ha_sum)/1_000_000.0))
+
+		target_cur.executemany("INSERT INTO bidders (bidder, class, units, contract_years, hector_name, description) VALUES (?, ?, ?, ?, ?, ?)", insert_bidders,)
+		target_cur.executemany("INSERT INTO forestry_bidder_metadata (bidder, rotation_year, cluster_index, available_area_mhectares) VALUES (?, ?, ?, ?)", insert_bidder_metadata,)
+		print(f"Forestry import: inserted {len(insert_bidders)} forestry bidders")
+
+		# 2) Insert forestry bid steps from forestry_bid_curves for all discount rates.
+		print("Forestry import: loading forestry bid curves for all discount rates")
+		curve_rows = source_cur.execute('''SELECT selected_rotation_year_int, cluster_index, bucket_id, npv_max_per_ha, area_ha_sum, discount_rate
+			FROM forestry_bid_curves ORDER BY selected_rotation_year_int, cluster_index, discount_rate, bucket_id''').fetchall()
+
+		insert_bids = []
+		for rotation_year, cluster_index, bucket_id, npv_max_per_ha, area_ha_sum, discount_rate in curve_rows:
+			bidder_name = bidder_name_for(rotation_year, cluster_index)
+			price_per_unit = -float(npv_max_per_ha) # SMDAMAGE remover bids are costs (negative values).
+			quantity_units = float(area_ha_sum) / 1_000_000.0
+			insert_bids.append((bidder_name, price_per_unit, quantity_units, float(discount_rate)))
+
+		target_cur.executemany("INSERT INTO bids (bidder, price_per_unit, quantity_units, discount_rate) VALUES (?, ?, ?, ?)", insert_bids, )
+		print(f"Forestry import: inserted {len(insert_bids)} forestry bid rows")
+
+		# 3) Insert forestry carbon removal schedules.
+		print("Forestry import: loading carbon removal schedules")
+		removal_rows = source_cur.execute('''SELECT selected_rotation_year, cluster_index, year, tC_per_ha_per_year
+			FROM carbon_removal_schedules ORDER BY selected_rotation_year, cluster_index, year''').fetchall()
+
+		rows_by_bidder = {}
+		for selected_rotation_year, cluster_index, year, tc_per_ha_per_year in removal_rows:
+			rotation_year = int(round(selected_rotation_year))
+			bidder_name = bidder_name_for(rotation_year, cluster_index)
+			if bidder_name not in rows_by_bidder:
+				rows_by_bidder[bidder_name] = {'contract_years': rotation_year, 'rows': []}
+			rows_by_bidder[bidder_name]['rows'].append((int(year), float(tc_per_ha_per_year)))
+
+		insert_removal = []
+		dropped_out_of_contract_rows = 0
+		violations = []
+		for bidder_name, bidder_data in rows_by_bidder.items():
+			contract_years = int(bidder_data['contract_years'])
+			bidder_rows = sorted(bidder_data['rows'], key=lambda x: x[0])
+			start_year = bidder_rows[0][0]
+			last_contract_year = start_year + contract_years - 1
+
+			for year, tc_per_ha_per_year in bidder_rows:
+				if year > last_contract_year:
+					dropped_out_of_contract_rows += 1
+					if abs(tc_per_ha_per_year) > zero_tolerance: violations.append((bidder_name, year, tc_per_ha_per_year, last_contract_year))
+					continue
+				insert_removal.append((bidder_name, year, tc_per_ha_per_year))
+
+		if violations:
+			example_lines = [f"{bidder} year={year} value={value:.6g} last_contract_year={cutoff}" for bidder, year, value, cutoff in violations[:10]]
+			raise ValueError("Found non-zero forestry_removal values beyond contract year. " f"violations={len(violations)}. Examples: " + "; ".join(example_lines))
+
+		target_cur.executemany("INSERT INTO forestry_removal (bidder, year, tons_per_hectare_per_year) VALUES (?, ?, ?)", insert_removal,)
+		print(f"Forestry import: inserted {len(insert_removal)} forestry removal rows (dropped {dropped_out_of_contract_rows} rows beyond contract years)")
+
+		target_conn.commit()
+		print(f"Loaded forestry from Busch SQLite: {len(insert_bidders)} bidders, {len(insert_bids)} bids (all discount rates), {len(insert_removal)} removal rows")
+	except Exception as e:
+		target_conn.rollback()
+		print(f"⚠ Error loading forestry from Busch SQLite: {e}")
+		raise
+	finally:
+		source_conn.close()
+		target_conn.close()
 
 if __name__ == "__main__":
 	script_dir = os.path.dirname(os.path.abspath(__file__))

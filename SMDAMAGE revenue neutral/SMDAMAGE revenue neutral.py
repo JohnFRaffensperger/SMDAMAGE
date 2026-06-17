@@ -76,7 +76,7 @@ def read_bids(scenario):
 	Bidders = database_interface.get_bidders()
 	for bidder in Bidders:
 		bidder_name = bidder['bidder_name']
-		bids = database_interface.get_bids(bidder_name)  # Returns list of (price, quantity) tuples
+		bids = database_interface.get_bids(bidder_name, scenario.discount_rate_base)  # Returns list of (price, quantity) tuples
 		for t in AllBidPeriods:
 			PT_set.add((bidder_name, t))
 			for bidstep, (price, quantity) in enumerate(bids):

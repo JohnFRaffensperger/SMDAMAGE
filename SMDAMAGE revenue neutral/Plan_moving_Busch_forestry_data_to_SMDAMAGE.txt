@@ -18,8 +18,8 @@ Architecture decision
 - Runtime database remains Data/smdamage_data.db.
 - create_database.py is the integration boundary: it imports/transforms forestry data from Output/Databases/Busch2024_to_SMDAMAGE.sqlite into Data/smdamage_data.db.
 - database_interface.py continues to read only from Data/smdamage_data.db at runtime.
-* Primary implementation path is direct import from Busch SQLite into Data/smdamage_data.db; no intermediate forestry files are required for runtime.
-* Direct-import forestry load should run in one database transaction and roll back on any validation failure.
+- Implementation path is direct import from Busch SQLite into Data/smdamage_data.db; no intermediate forestry files are required for runtime.
+- Direct-import forestry load should run in one database transaction and roll back on any validation failure.
 - Remove/create_database.py forestry assumptions:
 	- create_database.py still hardcodes forestry as a multi-column CSV layout with fixed column indices.
 	- Data/Forestry_bid_steps.csv is still a wide file with one shared quantity column and fixed forestry price columns.
@@ -83,13 +83,13 @@ C. Bid steps
 	- Exporter must assert that forestry_bid_curves.npv_column matches the expected mapped value for selected discount_rate.
 - Bid-step ordering:
 	* Authoritative step order is bucket_id ascending within (selected_rotation_year_int, cluster_index, discount_rate).
-	* When deterministic tie-breakers are required, sort by npv_min_per_ha, then npv_max_per_ha, then area_ha_sum.
+	* When deterministic tie-breakers are required, sort by npv_max_per_ha, then area_ha_sum.
 	* Price is validated as nondecreasing across ordered steps; if violated, fail import.
 	- quantity_mhectares is incremental per step: area_ha_sum / 1_000_000.
 
 SMDAMAGE code changes
-- In create_database.py, remove hardcoded forestry wide-file configuration based on Forestry_bid_steps.csv.
-- In create_database.py, build one importer pipeline that writes bidders, bids, and forestry_removal into smdamage_data.db.
+1. In create_database.py, remove hardcoded forestry wide-file configuration based on Forestry_bid_steps.csv.
+2. In create_database.py, build one importer pipeline that writes bidders, bids, and forestry_removal into smdamage_data.db.
 
 Done when
 - create_database.py populates Data/smdamage_data.db with data on bidders, bids, forestry_removal.
