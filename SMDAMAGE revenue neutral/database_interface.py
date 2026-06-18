@@ -50,8 +50,12 @@ def get_bids(bidder_name, discount_rate=None):
 		return do_query("SELECT price_per_unit, quantity_units FROM bids WHERE bidder = ? ORDER BY id", (bidder_name,))
 	return do_query("SELECT price_per_unit, quantity_units FROM bids WHERE bidder = ? AND (discount_rate IS NULL OR ABS(discount_rate - ?) < 1e-12) ORDER BY id",
 		(bidder_name, discount_rate),)
-# ag_bids = get_bids('Agriculture')
-# for i, (price, qty) in enumerate(ag_bids[:3]): print(f"  • Bid {i+1}: ${price:.2f}/MgtonC, {qty:.2f} MgtonC")
+
+def get_forestry_metadata():
+	"""Retrieve metadata for all forestry bidders."""
+	rows = do_query("SELECT bidder, rotation_year, cluster_index, available_area_mhectares FROM forestry_bidder_metadata")
+	columns = ["bidder", "rotation_year", "cluster_index", "available_area_mhectares"]
+	return {row[0]: dict(zip(columns, row)) for row in rows}
 
 def get_forestry_bidder_names():
 	results = do_query ("SELECT DISTINCT bidder FROM forestry_removal ORDER BY bidder collate nocase")

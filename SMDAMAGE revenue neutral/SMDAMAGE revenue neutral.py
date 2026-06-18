@@ -25,9 +25,12 @@ def get_warming_effects(scenario): # Get warming effects in degrees Celsius in e
 	Emitters = defaults_and_utilities.getEmitters() # ['C2F6', 'CF4', 'CH4', 'Carbon', 'HFC125', 'HFC134a', 'HFC143a', 'N2O','SF6']
 	Removers = defaults_and_utilities.getRemovers() # ['luc', 'Agriculture', 'Seaweed']
 
+	# Fetch all bidders dynamically to ensure Wpt_dict is initialized for everything in PT_set
+	AllBidders = [b['bidder_name'] for b in database_interface.get_bidders()]
+
 	# Wpt0 = a unit emission of pollutant or planting p induces degrees Celsius/kg marginal warming Wpt0[p, t0], t0 years after emission or tree planting.
 	# Time subscripts are floats because periods could be more often than years, e.g., 2025.0, 2025.5, ...
-	Wpt_dict = {(p, float(t0)): 0.0 for p in Emitters + Removers for t0 in range(defaults_and_utilities.getPulseDataLength())} # >= 0.
+	Wpt_dict = {(p, float(t0)): 0.0 for p in set(AllBidders + Emitters + Removers + ['luc']) for t0 in range(defaults_and_utilities.getPulseDataLength())} # >= 0.
 	scaleCelsius = 1000.0 # Thousandths of a degree.
 
 	if scenario.use_updated_Wpt: Wpt_pkl = defaults_and_utilities.open_pkl("SMDAMAGE_fitted_Wpt") # Retrieve the updated Wpt values from SMDAMAGE_fit_W.
@@ -47,16 +50,22 @@ def get_warming_effects(scenario): # Get warming effects in degrees Celsius in e
 		# Seaweed has same cooling effects as Agriculture, following either "luc" or "ffi" in Hector. Degrees C in warmingperiod per million tons emitted in emissionperiod. Divide by 1000 because Carbon pulse units are degrees C/gigaton.
 		Wpt_dict [('Seaweed', float(t0))] = Wpt_dict [('Agriculture', float(t0))]
 
-	# A hector of tree planting convolves into future carbon removal.
-	Treetypes = defaults_and_utilities.getTreeTypes() #['Loblolly_pine_150', 'Ponderosa_pine_150', 'Black_walnut_150', 'Loblolly_pine_10', 'Ponderosa_pine_10', 'Black_walnut_10', 'Loblolly_pine_24', 'Ponderosa_pine_103', 'Black_walnut_55']
-	Treetype_carbon_removal = defaults_and_utilities.get_Treetype_carbon_removal(Treetypes)
-	# A hector of tree planting convolves into future carbon removal, which convolves into future cooling.
+	# A hectare of tree planting convolves into future carbon removal, which convolves into future cooling.
 	# Forestry, cooling effects. Convolution of tree growth with carbon pulse. Degrees C in warmingperiod per million tons sequestered in emissionperiod. Divide by 1000 because Carbon pulse units are degrees C/gigaton.
-	for tree in Treetypes: # Tree is planted in year 0. Tree sequesters TonsSequesteredPerPeriod tonnes/hectare in each sequesterperiod from 0 to 155.
-		for treegrowthyear in range(0, 156): # Length of tree contract.
-			for coolingyear in range(treegrowthyear, defaults_and_utilities.getPulseDataLength()): # Growth in the last year of the contract has future cooling effects.
+	ForestryBidders = database_interface.get_forestry_bidder_names()
+	for tree in ForestryBidders:
+		removal_data = database_interface.get_forestry_carbon_removal(tree) # Returns list of (year, tc)
+		for year, tc in removal_data:
+			for coolingyear in range(year, defaults_and_utilities.getPulseDataLength()):
 				# Forestry has same cooling effects as Agriculture, following either "luc" or "ffi" in Hector, convolved with tree growth.
-				Wpt_dict[(tree, float(coolingyear))] += Treetype_carbon_removal[tree][treegrowthyear]*Wpt_dict[('Agriculture', float(coolingyear - treegrowthyear))]*scaleCelsius/1000.0
+				Wpt_dict[(tree, float(coolingyear))] += tc * Wpt_dict [('Agriculture', float(coolingyear - year))] * scaleCelsius / 1000.0
+
+	# 	CH4: MtCH4/yr, N2O: MtN2O-N/yr, C: MtC/yr, NMVOC: Mt/yr, BC: Mt/yr, OC: Mt/yr,
+	# 	CF4: kt/yr, C2F6: kt/yr, HFC125: kt/yr, HFC134a: kt/yr, HFC143a: kt/yr, CFC11: kt/yr, CFC12: kt/yr, HCF22: kt/yr]
+	for p in ['C2F6', 'CF4', 'CH4', 'HFC125', 'HFC134a', 'HFC143a', 'N2O', 'SF6']:
+		for t0 in range(defaults_and_utilities.getPulseDataLength()):
+			Wpt_dict[(p, float(t0))] = Pulse[p][1 + t0]*scaleCelsius/Pulse[p][0]
+	return Wpt_dict
 
 	# 	CH4: MtCH4/yr, N2O: MtN2O-N/yr, C: MtC/yr, NMVOC: Mt/yr, BC: Mt/yr, OC: Mt/yr,
 	# 	CF4: kt/yr, C2F6: kt/yr, HFC125: kt/yr, HFC134a: kt/yr, HFC143a: kt/yr, CFC11: kt/yr, CFC12: kt/yr, HCF22: kt/yr]
@@ -77,6 +86,14 @@ def read_bids(scenario):
 	for bidder in Bidders:
 		bidder_name = bidder['bidder_name']
 		bids = database_interface.get_bids(bidder_name, scenario.discount_rate_base)  # Returns list of (price, quantity) tuples
+
+		# Check for forestry bidders (units == 'mhectares' and discount_rate (in db) not NULL)
+		# NOTE: database_interface.get_bids filters out other forestry rates but includes non-forestry (NULL rate).
+		# We check if a forestry bidder actually returned bids for the requested rate.
+		is_forestry = bidder['units'] == 'mhectares' and bidder['bidder_name'] in database_interface.get_forestry_bidder_names()
+		if is_forestry and not bids:
+			raise ValueError(f"No bids found for forestry bidder '{bidder_name}' at discount rate {scenario.discount_rate_base}. Check the database.")
+
 		for t in AllBidPeriods:
 			PT_set.add((bidder_name, t))
 			for bidstep, (price, quantity) in enumerate(bids):
@@ -108,7 +125,6 @@ def run_SMDAMAGE(scenario): # Main function. Solve the SMDAMAGE model to find th
 	# Decision variables
 	qapt = {(a,p,t): LpVariable("qapt(" + str(a) + "," + p + "," + str(t) + ")", 0.0, Uapt[a,p,t]) for (a, p, t) in APT_set}
 	vpt = {(p,t): LpVariable("vpt(" + p + "," + str(t) + ")", None, None) for (p, t) in PT_set} # Must be a free variable.
-	mhectares_land = {t: LpVariable("mhectares_land(" + str(t) +")", 0, None)  for t in defaults_and_utilities.getModelPeriods()}
 	# Emitters face tax tau. Others do not. Reminder, Carbon is 'ffi' in pulsefile.
 	Emitters = defaults_and_utilities.getEmitters() # ['C2F6', 'CF4', 'CH4', 'Carbon', 'HFC125', 'HFC134a', 'HFC143a', 'N2O', 'SF6']
 
@@ -121,24 +137,18 @@ def run_SMDAMAGE(scenario): # Main function. Solve the SMDAMAGE model to find th
 	# print ("3. Creating model for first constraint year of " + str(BeginConstraintYear))
 	SMDAMAGE = LpProblem("SMDAMAGE", LpMaximize)
 
-	# print("Objective...", sep=None)
+	print("Objective...", sep=None)
 	SMDAMAGE += defaults_and_utilities.inflate_2020_to_2025()*lpSum(Bapt[a,p,t]*qapt[a,p,t] for (a, p, t) in APT_set), "Total value"
 
-	# Constraint on total land available for forestry and agriculture.
-	Foresters = [bidder for bidder in database_interface.get_bidders() if bidder['units'] == 'mhectares']
-	for t in defaults_and_utilities.getModelPeriods():
-		SMDAMAGE += lpSum(vpt[forester['bidder_name'], u]
-			for u in defaults_and_utilities.getBidPeriods() for forester in Foresters
-			if u <= t and t < u + float(forester['contract_years'])) <= 300, "Land(" + str(t) + ")"
-			# if u <= t and t < u + float(forester['contract_years'])) <= mhectares_land[t], "Land(" + str(t) + ")"
+	add_land_use_constraints(SMDAMAGE, vpt)
 
-	# print("Vpt rows...", sep=None)
+	print("Vpt rows...", sep=None)
 	Vname = {}
 	for (p, t) in PT_set:
 		Vname[(p,t)] = "Vpt(" + p + "," + str(t) + ")"
 		SMDAMAGE += vpt[p,t] == lpSum ([qapt[a,p,t] for a in BidStepSet[p,t]]), Vname[(p,t)]
 
-	# print("Capt rows...")
+	print("Capt rows...")
 	temperatureChange = {t: LpVariable("tempChange(" + str(t) + ")", None, None) for t in defaults_and_utilities.getModelPeriods()}
 
 	# Measuring actual temperature change, not the "taxed" surrogate temperature. If REVENUE_NEUTRAL, Temp_t equations should not constrain the model.
@@ -161,7 +171,7 @@ def run_SMDAMAGE(scenario): # Main function. Solve the SMDAMAGE model to find th
 	# print ("4. Writing a debug model...") # Edit the resulting LPT file with LP_Solve IDE.
 	# SMDAMAGE.writeLP(defaults_and_utilities.getOutputDirectory() + defaults_and_utilities.getExperimentTag(scenario) + ".lpt") # Easy to open with Notepad or LP_SolveIDE
 
-	# print ("5. Solving the model...")
+	print ("5. Solving the model...")
 	solve_status = LpStatus[SMDAMAGE.solve(PULP_CBC_CMD(msg=0))]
 
 	netrevenue = 0.0 # Show net revenue with marginal cost pricing.
@@ -170,9 +180,9 @@ def run_SMDAMAGE(scenario): # Main function. Solve the SMDAMAGE model to find th
 		netrevenue -= vpt[p,t].varValue*SMDAMAGE.constraints[Vname[(p,t)]].pi
 		yearlyrevenue[t] -= vpt[p,t].varValue*SMDAMAGE.constraints[Vname[(p,t)]].pi
 
-	# Save solution to CSV.
+	print ("Saving solution to CSV.")
 	# Agriculture and "Carbon" are in megatons of carbon (not CO2). Hector uses gigatons of carbon, so we need to convert Hector's gigatons warming effects to SMDAMAGE megatons decision variables and back again to Hector gigatons for validation.
-	Units = defaults_and_utilities.getUnits()
+	Units = {b['bidder_name']: b['units'] for b in database_interface.get_bidders()}
 	with open (defaults_and_utilities.SMDAMAGE_output_file_name(scenario), 'w') as myoutputfile:
 		myoutputfile.write(defaults_and_utilities.getExperimentTag(scenario) + ". Solve status " + solve_status + ". Total revenue " + str(netrevenue) + '\n')
 		myoutputfile.write(','.join(['Year']
@@ -208,7 +218,9 @@ def run_SMDAMAGE(scenario): # Main function. Solve the SMDAMAGE model to find th
 		defaults_and_utilities.append_temperatures_to_csv(scenario, "SMDAMAGE actual temp calibrated" if scenario.use_updated_Wpt else "SMDAMAGE actual temp uncalibrated", {t: scenario.initial_temperature + temperatureChange[t].varValue for t in defaults_and_utilities.getBidPeriods()})
 		if scenario.is_revenue_neutral: defaults_and_utilities.append_temperatures_to_csv(scenario, "SMDAMAGE taxed temp calibrated" if scenario.use_updated_Wpt else "SMDAMAGE taxed temp uncalibrated", {t: scenario.initial_temperature + taxedTemperatureChange[t].varValue for t in defaults_and_utilities.getBidPeriods()})
 	# for t in defaults_and_utilities.getModelPeriods(): print ("mhectares(" + str(t) + ") = " + str(mhectares_land[t].varValue))
-	for t in defaults_and_utilities.getModelPeriods(): print ("Land(" + str(t) + ").pi: ", SMDAMAGE.constraints["Land(" + str(t) + ")"].pi)
+	for t in defaults_and_utilities.getModelPeriods():
+		if f"Ag_Land({t})" in SMDAMAGE.constraints:
+			print(f"Ag_Land({t}).pi: {SMDAMAGE.constraints[f'Ag_Land({t})'].pi}")
 	print (f"SMDAMAGE done. Solve status {solve_status}. Objective ${value(SMDAMAGE.objective) / 1000:.2f} billion. Net revenue {netrevenue}. Tau {local_tau}. 2125 temp " + str(round(scenario.initial_temperature + temperatureChange [2125].varValue,3)) + " thousandths C.")
 	# print ("Done, %s, %.1f seconds." % (time.asctime(time.localtime(time.time())), float(time.time() - startTime)))
 	# print ("Reminder: convert $/ton C to $/ton CO2. Temp in 2125 is " + str(round(scenario.initial_temperature + temperatureChange [2125].varValue,3)) + " thousandths of a degree C.")
@@ -232,6 +244,22 @@ def update_tau (old_temp, current_temp, old_tau, current_tau, step_size):
 # current_temp = {2125: -100.0, 2126: 12.0, 2127: 80.0}
 # print("\n\n", update_tau(old_temp, current_temp, old_tau, current_tau, 1.0))
 
+def add_land_use_constraints(SMDAMAGE, vpt):
+	"""Constraint on total land available for forestry and agriculture."""
+	forestry_meta = database_interface.get_forestry_metadata()
+	# all_bidders = database_interface.get_bidders()
+	for t in defaults_and_utilities.getModelPeriods():
+		# Combined land constraint for agricultural bidders
+		# Ag_bidders = [b for b in all_bidders if b['bidder_name'] in ['Agriculture', 'Seaweed']]
+		# SMDAMAGE += lpSum(vpt[ag['bidder_name'], u]
+		# 	for u in defaults_and_utilities.getBidPeriods() for ag in Ag_bidders
+		# 	if u <= t and t < u + float(ag['contract_years'])) <= 300, "Ag_Land(" + str(t) + ")"
+
+		# Bidder-specific land constraints for forestry
+		for bidder_name, meta in forestry_meta.items():
+			SMDAMAGE += lpSum(vpt[bidder_name, u] for u in defaults_and_utilities.getBidPeriods()
+				if (bidder_name, u) in vpt and u <= t and t <= u + meta['rotation_year'] - 1) <= meta['available_area_mhectares'], f"Forestry_Land_{bidder_name}_{t}"
+
 def run_SMDAMAGE_for_tau(scenario): # This version finds the optimal tau.
 	Wpt_dict = get_warming_effects(scenario) # Get warming effects in degrees Celsius in each period, based on the solution vpt.
 	Bapt, Uapt, APT_set, PT_set = read_bids(scenario)
@@ -251,7 +279,7 @@ def run_SMDAMAGE_for_tau(scenario): # This version finds the optimal tau.
 	Emitters = defaults_and_utilities.getEmitters() # Emitters face tax tau. Others do not.
 
 	# Agriculture and "Carbon" are in megatons of carbon (not CO2). Hector uses gigatons of carbon, so we need to convert Hector's gigatons warming effects to SMDAMAGE megatons decision variables and back again to Hector gigatons for validation.
-	Units = defaults_and_utilities.getUnits() # {'Agriculture':'mtC', 'Black_walnut_150':'mhectares', 'Black_walnut_10':'mhectares', 'Black_walnut_55':'mhectares', 'C2F6':'kt', 'CF4':'kt', 'CH4':'mt', 'Carbon':'mtC', 'HFC125':'kt', 'HFC134a':'kt', 'HFC143a':'kt', 'Loblolly_pine_150':'mhectares', 'Loblolly_pine_10':'mhectares', 'Loblolly_pine_24':'mhectares', 'N2O':'mt', 'Ponderosa_pine_150':'mhectares', 'Ponderosa_pine_10':'mhectares', 'Ponderosa_pine_103':'mhectares', 'Seaweed':'mt', 'SF6':'kt'}
+	Units = {b['bidder_name']: b['units'] for b in database_interface.get_bidders()}
 
 	# You might want to solve the model for multiple BeginConstraintYears.
 	for BeginConstraintYear in range(int(defaults_and_utilities.getFirstConstrainedYear()), int(defaults_and_utilities.getFirstConstrainedYear()) + 1, 1):
@@ -272,7 +300,7 @@ def run_SMDAMAGE_for_tau(scenario): # This version finds the optimal tau.
 			# Objective
 			SMDAMAGE = LpProblem("SMDAMAGE", LpMaximize)
 			SMDAMAGE += defaults_and_utilities.inflate_2020_to_2025()*lpSum(Bapt[a,p,t]*qapt[a,p,t] for (a, p, t) in APT_set), "Total value"
-			add_land_use_constraints(SMDAMAGE, vpt, PT_set, BidStepSet, Uapt)
+			add_land_use_constraints(SMDAMAGE, vpt)
 			# Variables
 			Vname = {}
 			for (p, t) in PT_set:
@@ -374,7 +402,8 @@ def run_SMDAMAGE_short_auctions(scenario):
 		TotalU[p,t] += Uapt[a,p,t]
 		BidStepSet[p,t].append(a)
 
-	Units = defaults_and_utilities.getUnits() # Agriculture and "Carbon" are in megatons of carbon (not CO2). Hector uses gigatons of carbon, so we need to convert Hector's gigatons warming effects to SMDAMAGE megatons decision variables and back again to Hector gigatons for validation.
+	# Agriculture and "Carbon" are in megatons of carbon (not CO2). Hector uses gigatons of carbon, so we need to convert Hector's gigatons warming effects to SMDAMAGE megatons decision variables and back again to Hector gigatons for validation.
+	Units = {b['bidder_name']: b['units'] for b in database_interface.get_bidders()}
 
 	# Create CSV file with headers.
 	with open(defaults_and_utilities.SMDAMAGE_output_file_name(scenario), 'w') as myoutputfile:
@@ -409,6 +438,8 @@ def run_SMDAMAGE_short_auctions(scenario):
 
 		SMDAMAGE = LpProblem("SMDAMAGE", LpMaximize) # Create model.
 		SMDAMAGE += defaults_and_utilities.inflate_2020_to_2025()*lpSum(Bapt[a,p,t]*qapt[a,p,t] for (a, p, t) in APT_set if t in BidPeriods), "Total value" # Objective.
+
+		add_land_use_constraints(SMDAMAGE, vpt)
 
 		# Vpt rows.
 		Vname = {}
