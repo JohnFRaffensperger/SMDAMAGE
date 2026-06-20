@@ -9,6 +9,7 @@ import csv # for CSV file operations
 import os # for file system operations
 import pickle # for pickle file operations
 import hector_interface # Hector pulse generation functions.
+import database_interface # for dynamic bidder and tree data.
 
 # Directories and file names.
 def getOutputDirectory(): 			return "./SMDAMAGE revenue neutral/Output/" # Must exist
@@ -16,14 +17,14 @@ def SMDAMAGE_output_file_name(scenario): return getOutputDirectory() + "SMDAMAGE
 def Hector_output_file_name(scenario): return getOutputDirectory() + "Hector_output_" + experimentTag_to_file_name(scenario) + ".csv"
 
 # These are the market participants. Emitters face tax tau. Removers do not.
-def getEmitters(): return ['C2F6', 'CF4', 'CH4', 'Carbon', 'HFC125', 'HFC134a', 'HFC143a', 'N2O','SF6']
-def getRemovers(): return ['Agriculture', 'Seaweed', 'Loblolly_pine_150', 'Ponderosa_pine_150', 'Black_walnut_150', 'Loblolly_pine_10', 'Ponderosa_pine_10', 'Black_walnut_10', 'Loblolly_pine_24', 'Ponderosa_pine_103', 'Black_walnut_55']
+def getEmitters(): return [b['bidder_name'] for b in database_interface.get_bidders() if b['class'].lower() == 'emitter']
+def getRemovers(): return [b['bidder_name'] for b in database_interface.get_bidders() if b['class'].lower() == 'remover']
 def getChemicals(): return ['C2F6', 'CF4', 'HFC125', 'HFC134a', 'HFC143a', 'SF6'] # Must be within Emitters.
 # TreeTypes must be within Removers.
-def getTreeTypes():	return ['Loblolly_pine_150', 'Ponderosa_pine_150', 'Black_walnut_150', 'Loblolly_pine_10', 'Ponderosa_pine_10', 'Black_walnut_10', 'Loblolly_pine_24', 'Ponderosa_pine_103', 'Black_walnut_55']
+def getTreeTypes():	return database_interface.get_forestry_bidder_names()
 
 # Agriculture and "Carbon" are in megatons of carbon (not CO2). Hector uses gigatons of carbon, so we need to convert Hector's gigatons warming effects to SMDAMAGE megatons decision variables and back again to Hector gigatons for validation.
-def getUnits(): return {'Agriculture':'mtC', 'Black_walnut_150':'mhectares', 'Black_walnut_10':'mhectares', 'Black_walnut_55':'mhectares', 'C2F6':'kt', 'CF4':'kt', 'CH4':'mt', 'Carbon':'mtC', 'HFC125':'kt', 'HFC134a':'kt', 'HFC143a':'kt', 'Loblolly_pine_150':'mhectares', 'Loblolly_pine_10':'mhectares', 'Loblolly_pine_24':'mhectares', 'N2O':'mt', 'Ponderosa_pine_150':'mhectares', 'Ponderosa_pine_10':'mhectares', 'Ponderosa_pine_103':'mhectares', 'Seaweed':'mtC', 'SF6':'kt'}
+def getUnits(): return {b['bidder_name']: b['units'] for b in database_interface.get_bidders()}
 
 # Part 0. Key parameters. These parameters go to file names and headers. If you change something here, a function may be expecting the wrong filename.
 #                                               2125 <<<<<<<<<<<<<< Temperature constrained <<<<<<<<<<<<<<<<< 2306
@@ -96,26 +97,21 @@ def open_pkl(your_pkl_filename): # retrieves previously saved solution vpt.
 	with open(getOutputDirectory() + your_pkl_filename + ".pkl", "rb") as mypickle:
 		return pickle.load(mypickle)
 
-# Forestry, carbon removed for each possible contract.
-# The year of planting is the "u_emissionperiod". Pulse units are degrees/megatonnes or degrees/kilotonnes, so we have to convolve growth over time.
-def get_Treetype_carbon_removal (Treetypes):
-	Treetype_carbon_removal = {tree: {t: 0.0 for t in range(156)} for tree in Treetypes} # where 156 is the longest tree contract.
-	with open ('./data/Forestry_Sequestration.csv') as forestryfile: # Year, Tonnes/hectare/year Loblolly pine, Tonnes/hectare/year Ponderosa pine	Tonnes/hectare/year Black walnut
-		lines = [line.split(',') for line in forestryfile]
-		for growthyear, line in enumerate(lines[1:]): # For each row, i.e., growth year
-			for treeNumber, carbonRemoval in enumerate(line[1:]): # For each column, i.e., treetype, in the table.
-				Treetype_carbon_removal[Treetypes[treeNumber]][growthyear] = float(carbonRemoval)
-	return Treetype_carbon_removal
-
 # Forestry, carbon removed in the optimal auction schedule.
 def get_tree_schedule_carbon_removal (vpt): # Matches the spreadsheet convolution exactly.
 	Treetypes = getTreeTypes()
-	Treetype_carbon_removal = get_Treetype_carbon_removal(Treetypes)
-
 	mtC_removed = {t: 0.0 for t in getModelPeriods()}
-	for u in getBidPeriods():
-		for tree in Treetypes:
-			for t in range(int(u), 1 + int(max(getModelPeriods()))): #
-				if t - u >= 156: break # don't run longer than the tree contract.
-				mtC_removed [t] += vpt[tree,u].varValue*Treetype_carbon_removal[tree][t - u]
+
+	for tree in Treetypes:
+		removal_data = database_interface.get_forestry_carbon_removal(tree)
+		tc_dict = {int(year): tc for year, tc in removal_data}
+
+		for u in getBidPeriods():
+			if (tree, u) in vpt:
+				vpt_val = vpt[tree,u].varValue
+				if vpt_val is not None and vpt_val != 0:
+					for growth_year, tc in tc_dict.items():
+						t = u + float(growth_year)
+						if t in mtC_removed:
+							mtC_removed[t] += vpt_val * tc
 	return mtC_removed

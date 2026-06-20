@@ -2,7 +2,6 @@
 *.lpt
 SMDAMAGE revenue neutral/Output/*.lpt
 Data/*.lpt
-Data/*.db
 
 # Python cache files
 __pycache__/

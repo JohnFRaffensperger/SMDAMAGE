@@ -1,92 +1,45 @@
-Plan: update SMDAMAGE revenue neutral.py to use new forestry data in smdamage_data.db
+Examine land use constraints.
+- Are the forestry constraints tight? What is their dual price? How does it affect the revenue? Figure out how to prevent them being tight.
+- Need to explain the forestry constraints in the paper.
+- Calculate agricultural land use. Decide whether to use agriculture land constraints.
+- Calculate seaweed area use. Decide whether to use seaweed area constraints.
 
-Goal
-- Make SMDAMAGE revenue neutral.py consume forestry bids and land-cap metadata from the new schema:
-  - bids.discount_rate (all forestry rates stored)
-  - forestry_bidder_metadata.available_area_mhectares (explicit bidder max area)
-- Preserve behavior for non-forestry bidders and existing objective/constraint logic.
+Run all experiments and update the paper.
+Improve Github site.
 
-Current state to account for
-- smdamage_data.py contains forestry bids for all discount rates and forestry_bidder_metadata.
-- read_bids(scenario) currently reads all bids by bidder and period without regard to discount rate.
-- read_bids(scenario) must be updated to retrieve forestry bids for the selected scenario discount rate.
-- Land constraints currently use bidders with units == mhectares and bidder.contract_years, but no explicit metadata table lookup.
+---------------
 
-Design decisions
-1) Bid retrieval by discount rate
-- Forestry bidders: pull only rows where bids.discount_rate matches scenario.discount_rate_base.
-- Non-forestry bidders: keep discount_rate NULL and include them regardless of scenario rate.
-- Keep scenario.discount_rate(t - StartYear) multiplier in objective coefficient construction unless intentionally changing economics.
+Plan to implement a simplified linear programming column and row generation algorithm.
 
-2) Forestry max area source of truth
-- Use forestry_bidder_metadata.available_area_mhectares as the authoritative max area for each forestry bidder.
-- Use bidders.contract_years for contract window logic (already set from rotation year).
+(1) Create a new standalone SQLite database named smdamage_solutions.db in the output directory to store all linear programming solutions.
+The purpose is to construct later models with a restricted number of rows and columns based on previous solutions.
+The database should track the details of each scenario. The database should track the non-zero objective function coefficients of columns.
+Indexing of tables should allow fast retrieval of variables by objective function coefficient or perhaps better yet by bid ID, assuming bid ID is ordered by increasing price, and being careful of the different signs for emitters and removers.
+Variable Indexing: Instead of "variable name," store the Bidder Name + Step Index. Column names like qapt(5,Carbon,2025.0) can be brittle if you change time-steps.
 
-3) Land constraints
-- Replace pooled forestry land cap with bidder-specific constraints:
-  for each forestry bidder f and model period t,
-  	sum_{u active at t} vpt[f, u] <= available_area_mhectares[f] with active condition: u <= t and t <= u + contract_years[f] - 1.
+Add accessors to Read from and write to the database.
+When saving a current solution, filter linear programming columns by value as to whether they are close to zero.
+Do not store columns close to zero.
 
-Implementation steps
+For the tau search, Use an in-memory dictionary for speed during a single run.
+Only commit to smdamage_solutions.db at the end of an experiment to serve as a long-term "warm start" for future sessions.
+smdamage_solutions.db should record the iteration number of each solution.
 
-A. database_interface.py updates
-- Add function get_forestry_metadata():
-  - SELECT bidder, rotation_year, cluster_index, available_area_mhectares FROM forestry_bidder_metadata
-  - return dict keyed by bidder for fast lookup.
-- Keep get_bids(bidder_name, discount_rate=None) behavior:
-  - if discount_rate provided, include bidder rows with discount_rate IS NULL OR rate match.
-  - this preserves non-forestry bids while filtering forestry by scenario rate.
+(2) Add a new function Solve_SMDAMAGE(smdamage pulp model).
+This function first checks smdamage_solutions.db to determine the maximum breakpoint of the bid curve for each variable type,
+below which the bid was accepted in any scenario, above which the bid was rejected in every scenario.
+When "removing" variables, don't actually delete them from your Python lists. Just don't instantiate the LpVariable or don't include it in the lpSum.
+This makes "adding it back" much easier.
 
-B. SMDAMAGE revenue neutral.py read_bids(scenario)
-- Continue iterating over Bidders = database_interface.get_bidders().
-- For each bidder_name, call get_bids(bidder_name, scenario.discount_rate_base).
-- Add a check for forestry bidders (units == 'mhectares' and discount_rate not NULL):
-  - if no bids returned for the scenario rate, fail fast with a clear message listing bidder and requested rate.
-- Keep existing unit conversion behavior for kt bidders.
+The function removes variables from the current unsolved model that are two steps above (more costly) the breakpoint.
+That is, we would expect two bids (within each bid curve) in the solved model to be zero.
 
-C. SMDAMAGE revenue neutral.py land constraints
-- Load forestry metadata once before building land constraints:
-  forestry_meta = database_interface.get_forestry_metadata()
-- Define Foresters as bidders where units == 'mhectares' and discount_rate not NULL.
-- Build one land constraint per forestry bidder per period using forestry_meta[bidder]['available_area_mhectares'].
-- Use bidder.contract_years from get_bidders() for active contract windows.
-- Fail fast if a forestry bidder in bidders has no metadata row.
+This function also checks for land area constraints which are binding and removes (pops) land area constraints which were non-binding in every previously solved scenario.
+When saving the solution, check constraint.slack. If slack is 0 (or very close), mark that land constraint as "Binding."
 
-D. Optional consistency checks (recommended)
-- At model setup:
-  - check set(Foresters) == set(forestry_meta keys); if not, raise with missing/extras.
-  - check scenario.discount_rate_base exists among forestry bids (for at least one forestry bidder).
-
-Validation plan
-1) Database-level checks after create_database.py
-- Query distinct forestry discount rates in bids and confirm expected set (e.g., 0.0, 0.015, 0.03, 0.06).
-- Query forestry_bidder_metadata row count equals number of forestry bidders in bidders.
-
-2) Model input checks
-- Run read_bids(scenario) for each supported scenario discount rate and verify:
-  - forestry bidders receive non-empty bid lists
-  - non-forestry bidders unaffected
-
-3) Constraint checks
-- On solved model output, verify each forestry bidder-period utilization does not exceed available_area_mhectares.
-- Confirm no KeyError/missing metadata failures.
-
-4) Regression checks
-- Solve at least one baseline scenario and compare:
-  - solution status remains optimal/feasible
-  - objective remains in expected range
-  - output file generation unchanged.
-
-Potential pitfalls
-- Double-discounting concern: if forestry bids already encode NPV at selected discount_rate, applying scenario discount_rate(t - StartYear) over time may be intended or may over-discount depending on model economics; keep current behavior unless changing model design deliberately.
-- Floating comparison on discount rates: use tolerance in SQL (already done via ABS(discount_rate - ?) < 1e-12).
-- Missing forestry rate rows for uncommon scenario rates should fail fast with actionable error text.
-
-Deliverables
-- Updated database_interface.py query helpers.
-- Updated SMDAMAGE revenue neutral.py read_bids and land-constraint sections.
-- Short verification log showing:
-  - selected discount rate,
-  - forestry bidders loaded,
-  - metadata row count,
-  - successful solve status.
+(3) The function Solve_SMDAMAGE then solves the linear program with the restricted column and row sets.
+After solution, the function checks whether the bids that were expected to be zero were positive.
+If so, the function adds the relevant columns for  two more bid steps.
+The function also checks whether any omitted land area constraints would have been binding in any scenario; if so, the function adds those constraints.
+The function omit any empty constraints. The function then solves the model again.
+The function reports with a simple print statement whether any columns or rows had to be added, and the time to solve each linear program.
