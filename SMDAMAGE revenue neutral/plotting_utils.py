@@ -2,7 +2,9 @@
 
 import matplotlib.pyplot as mplot
 import matplotlib.ticker as mticker
+import sqlite3
 import database_interface
+import defaults_and_utilities
 
 def plot_temps_SMDAMAGE_and_Hector(scenario, taxedTemperatureChange, actualTemperatureChange, Hector_temperature, getOutputDirectory, experimentTag_to_file_name):
 	"""Compare temperature trajectories between SMDAMAGE and Hector models"""
@@ -285,3 +287,71 @@ def Price_trajectory_with_full_commitment_tau_1_6(db_path, output_directory, sce
 
 	ax.grid(True, which='major')
 	mplot.savefig(output_directory + "Price_trajectory_with_full_commitment_tau_1.6.svg", bbox_inches='tight', pad_inches=0)
+
+def Summary_of_estimates_to_end_global_warming(db_path, output_directory=None):
+	"""Summarize the current solution set for the five estimate scenarios.
+
+	The summary matches the table in Work in progress, SMDAMAGE.txt.
+	"""
+	begin_year = 2025.0
+	end_year = 2125.0
+
+	columns = [("Estimate 3", 46, "ST, weak contracts"), ("Estimate 1", 39, "LT"), ("Estimate 4", 50, "ST, short auctions"), ("Estimate 2", 45, "ST"), ("Estimate 5", 51, "ST, time-varying τ"), ]
+
+	def _trim_number(value, decimals=2):
+		text = f"{value:.{decimals}f}"
+		return text.rstrip('0').rstrip('.')
+
+	def _load_scalar(cursor, sql, params):
+		cursor.execute(sql, params)
+		row = cursor.fetchone()
+		if row is None or row[0] is None: raise ValueError(f"Missing summary data for query: {sql!r} params={params!r}")
+		return row[0]
+
+	conn = sqlite3.connect(db_path)
+	cursor = conn.cursor()
+	third_party_pays = []
+	average_emitter_price = []
+	average_remover_price = []
+	emissions_2025_2125 = []
+	removal_cost_2025_2125 = []
+
+	for _, scenario_id, _ in columns:
+		total_revenue = _load_scalar(cursor, "SELECT total_revenue FROM scenarios WHERE id = ?", (scenario_id,))
+		third_party_pays.append(total_revenue / 1_000_000.0) # Convert millions to trillions.
+
+		avg_emitter_price = _load_scalar(cursor, "SELECT AVG(dual_price) FROM scenario_bidder_year WHERE scenario_id = ? AND bidder = ? AND year >= ? AND year <= ?", (scenario_id, "Carbon", begin_year, end_year),)
+		average_emitter_price.append((avg_emitter_price, avg_emitter_price * 44.0 / 12.0))
+
+		avg_remover_price = _load_scalar(cursor, "SELECT AVG(dual_price) FROM scenario_bidder_year WHERE scenario_id = ? AND bidder = ? AND year >= ? AND year <= ?", (scenario_id, "Agriculture", begin_year, end_year), )
+		average_remover_price.append((avg_remover_price, avg_remover_price * 44.0 / 12.0))
+
+		emissions = _load_scalar(cursor, "SELECT SUM(quantity_value) FROM scenario_bidder_year WHERE scenario_id = ? AND bidder = ? AND year >= ? AND year <= ?", (scenario_id, "Carbon", begin_year, end_year), )
+		emissions_2025_2125.append(emissions / 1000.0)
+
+		removers = defaults_and_utilities.getRemovers()
+		removal_cost = 0.0
+		for remover in removers:
+			cursor.execute("SELECT COALESCE(SUM(quantity_value * dual_price), 0.0) FROM scenario_bidder_year WHERE scenario_id = ? AND bidder = ? AND year >= ? AND year <= ?", (scenario_id, remover, begin_year, end_year),)
+			removal_cost += cursor.fetchone()[0] or 0.0
+		removal_cost_2025_2125.append(removal_cost / 1_000_000.0)
+
+	conn.close()
+
+	lines = []
+	lines.append("\t".join([estimate_label for estimate_label, _, _ in columns]))
+	lines.append("\t".join(["Model"] + [model_label for _, _, model_label in columns]))
+	lines.append("\t".join(["Third party pays"] + ["$" + _trim_number(value) + " trillion" for value in third_party_pays]))
+	lines.append("\t".join(["Average emitter price"] + [f"${_trim_number(price_tC)} /tC (${_trim_number(price_tCO2)} /tCO2)".replace(" ", "") for price_tC, price_tCO2 in average_emitter_price]))
+	lines.append("\t".join(["Average remover price"] + [f"${_trim_number(price_tC)} /tC (${_trim_number(price_tCO2)} /tCO2)".replace(" ", "") for price_tC, price_tCO2 in average_remover_price]))
+	lines.append("\t".join(["Emissions 2025-2125"] + [f"{_trim_number(value, 1)} GtC" for value in emissions_2025_2125]))
+	lines.append("\t".join(["Removal cost 2025-2125"] + ["$" + _trim_number(value) + " trillion" for value in removal_cost_2025_2125]))
+
+	table_text = "\n".join(lines)
+	print(table_text)
+
+	output_directory = output_directory or defaults_and_utilities.getOutputDirectory()
+	with open(output_directory + "Summary_of_estimates_to_end_global_warming.txt", "w", encoding="utf-8") as output_file:
+		output_file.write(table_text + "\n")
+
+	return table_text

@@ -1,6 +1,17 @@
 Plan: move all CSV/PKL solution outputs into smdamage_solutions.db, verify full parity, then retire file writes.
 
 - Write queries and plots to create each table and each figure.
+
+
+	Estimate 3	Estimate 1	Estimate 4	Estimate 2	Estimate 5
+	Model	ST, weak contracts	LT	ST, short auctions	ST	ST, time-varying τ
+	Third party pays	$0	$4.75 trillion	$0	$0	$0
+	Average emitter price	$44.58/tC ($163.46/tCO2)	$10.94/tC ($40.13/tCO2)	$16.30/tC ($59.78/tCO2)	$16.09/tC ($59.98/tCO2)	$16.04/tC ($58.83/tCO2)
+	Average remover price	$7.33/tC ($26.86/tCO2)	$10.94/tC ($40.13/tCO2)	$10.87/tC ($39.85/tCO2)	$10.06/tC ($36.87/tCO2)	$10.10/tC ($37.04/tCO2)
+	Emissions 2025-2125	420.9 GtC	761 GtC	688 GtC	681 GtC	682 GtC
+	Removal cost 2025-2125	$20.4 trillion	$13.06 trillion	$12.7 trillion	$11.2 trillion	$10.84 trillion
+
+
 - Remove references to CSV, "series_source", and "artifact" from the database schema.
 - Double-check that no code relies on CSV nor PKL files.
 - Remove all write functions to legacy CSV files and PKL files.

@@ -789,6 +789,7 @@ if __name__ == "__main__":
 	# plotting_utils.Carbon_emissions_with_4_surcharge_rates(defaults_and_utilities.getSolutionsDBPath(), defaults_and_utilities.getOutputDirectory())
 	# plotting_utils.Discounted_net_revenue_with_4_surcharge_rates(defaults_and_utilities.getSolutionsDBPath(), defaults_and_utilities.getOutputDirectory())
 	# plotting_utils.Temperature_trajectories_with_4_surcharge_rates(defaults_and_utilities.getSolutionsDBPath(), defaults_and_utilities.getOutputDirectory())
-	plotting_utils.Price_trajectory_with_full_commitment_tau_1_6(defaults_and_utilities.getSolutionsDBPath(), defaults_and_utilities.getOutputDirectory())
+	# plotting_utils.Price_trajectory_with_full_commitment_tau_1_6(defaults_and_utilities.getSolutionsDBPath(), defaults_and_utilities.getOutputDirectory())
+	plotting_utils.Summary_of_estimates_to_end_global_warming(defaults_and_utilities.getSolutionsDBPath(), defaults_and_utilities.getOutputDirectory())
 	import winsound
 	winsound.Beep(700, 500)  # Frequency: 1000 Hz, Duration: 500 ms

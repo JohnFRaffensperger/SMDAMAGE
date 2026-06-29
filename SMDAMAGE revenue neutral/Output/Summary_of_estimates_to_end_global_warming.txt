@@ -1,0 +1,7 @@
+Estimate 3	Estimate 1	Estimate 4	Estimate 2	Estimate 5
+Model	ST, weak contracts	LT	ST, short auctions	ST	ST, time-varying τ
+Third party pays	$22.62 trillion	$2.48 trillion	$0.96 trillion	$1.76 trillion	$4.75 trillion
+Average emitter price	$-159.21/tC($-583.76/tCO2)	$-13.87/tC($-50.85/tCO2)	$-3.23/tC($-11.85/tCO2)	$-6.05/tC($-22.17/tCO2)	$-15.34/tC($-56.25/tCO2)
+Average remover price	$10.23/tC($37.51/tCO2)	$13.87/tC($50.85/tCO2)	$2.16/tC($7.9/tCO2)	$3.79/tC($13.89/tCO2)	$8.96/tC($32.84/tCO2)
+Emissions 2025-2125	206.2 GtC	380.1 GtC	380.1 GtC	380.1 GtC	379.8 GtC
+Removal cost 2025-2125	$5.4 trillion	$3.52 trillion	$0.52 trillion	$0.76 trillion	$1.73 trillion
