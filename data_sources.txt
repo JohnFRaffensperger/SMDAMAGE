@@ -1,0 +1,98 @@
+# SMDAMAGE Data Sources and Processing Documentation
+
+This document describes the sources and processing steps for the emission and removal data used in SMDAMAGE.
+
+## 1. Pollutant Data Sources
+
+### Carbon (ffi_emissions)
+- **Primary Source**: Anger, N., & Sathaye, J. (2008). "Reducing deforestation and trading emissions: Economic implications for the post-Kyoto period." SSRN-id1114044.
+- **Details**: Specifically the Appendix for marginal abatement cost (MAC) curves across 25 regions and 2 sectors (Energy intensive and Non-energy intensive).
+- **Global Scaling**: Total quantity scaled to match global 2022 fossil fuel emissions (~37,490 Mtons CO2 or ~10,232 Mtons C) based on Statista data and CDIAC conversion factors (1 ppm CO2 = 2.13 Gt C).
+- **Reference URL**: [CDIAC Conversion Factors](https://cdiac.ess-dive.lbl.gov/pns/convert.html)
+
+### Methane (CH4) & Nitrous Oxide (N2O)
+- **Primary Source**: Harmsen, J.H.M., et al. (2015). "How many non-CO2 greenhouse gas mitigation measures would we need to achieve the 2°C target?" *Climate Policy*.
+- **Data File**: `mmc1.xlsx` (Supplementary material).
+- **Details**: Marginal abatement costs for non-CO2 gases. Baseline burdens guesstimated from Hector and NOAA AGGI.
+- **Reference URL**: [NOAA AGGI](https://www.esrl.noaa.gov/gmd/aggi/aggi.html)
+
+### Other Chemicals (C2F6, CF4, HFC125, HFC134a, HFC143a, SF6)
+- **Primary Source**: Harmsen et al. (2015) supplementary data (`mmc2.xlsx`), https://www-sciencedirect-com.ezp.lib.rochester.edu/science/article/pii/S2352340919306882?ref=pdf_download&fr=RR-2&rr=a0f47e292e6a8c35
+- **Details**: kt-scale emissions for fluorinated gases (HFCs, PFCs, SF6).
+- **Managed Substances**: Some substances (e.g., CFC-11, CFC-12) are noted as "Controlled" under international protocols.
+
+### Agriculture
+- **Primary Source**: Smith, P. et al. (2014). "Agriculture, Forestry and Other Land Use (AFOLU)." In: *Climate Change 2014: Mitigation of Climate Change* (IPCC AR5 WGIII), Figure 11.17.
+- **Details**: GtCO2/year mitigation potential for OECD, EIT, and other regions at $20, $50, and $100/ton CO2.
+- **Reference**: IPCC AR5 WGIII Chapter 11.
+
+### Seaweed
+- **Primary Source**: Krause-Jensen, D., & Duarte, C. M. (2016). "Substantial role of macroalgae in marine carbon sequestration." *Nature Geoscience*.
+- **Details**: Global potential of 48 million sq km (~4800 million ha).
+- **Processing**: Max area limited to 48 million sq km; removal rate of ~3.03 tons C/ha/year.
+
+### Forestry
+- **Primary Source**: Stavins, R. N., & Richards, K. R. (2005). "The cost of US forest-based carbon sequestration." Pew Center on Global Climate Change.
+- **Modern Source**: Busch (2024) SQLite database (`Busch2024_to_SMDAMAGE.sqlite`), which provides clustered bidders, NPVs, and removal schedules for Loblolly pine, Ponderosa pine, and Black walnut.
+
+## 2. Data Processing and Bid Curve Construction
+
+The bid curves are constructed as piecewise linear functions (step functions) where each "bid" represents a tranche of mitigation or removal at a specific price.
+
+### Global Carbon MAC Curve (ffi_emissions)
+- **Calculation**: Data for 25 regions and 2 sectors were aggregated. To create a continuous global curve, the data was organized into **10Mt C tranches**.
+- **Linearity**: The spreadsheet uses a linear combination of the regional MAC curves.
+- **Bid Steps**: **412 steps** are defined in [MtC_bid_steps.csv](Data/MtC_bid_steps.csv).
+- **Adjustments**:
+  - Prices: Inflated from 2005 EUR to 2022 USD (Rate: 2.28%/year; Conversion: 1.1 USD/EUR).
+  - Quantity: Scaled by a global factor (approx 3.74) to reach the 2022 emission baseline of 10,232 MtC.
+  - Baseline: A 100 MtC tranche is added at $0 to represent cost-neutral "low-hanging fruit."
+
+### Non-CO2 Gases (CH4, N2O, Chemicals)
+- **Calculation**: Bid steps were derived from the Harmsen et al. (2015) datasets.
+- **Linearity**: The sources provide discrete price/quantity pairs; the spreadsheets maintain these as discrete steps.
+- **Bid Steps**:
+  - **CH4**: **201 steps** in [CH4_bid_steps.csv](Data/CH4_bid_steps.csv).
+  - **N2O**: **201 steps** in [N2O_bid_steps.csv](Data/N2O_bid_steps.csv).
+  - **F-Gases (C2F6 to SF6)**: Combined into **201 steps** in [C2F6_CF4_HFC125_HFC134a_HFC143a_SF6_bidsteps.csv](Data/C2F6_CF4_HFC125_HFC134a_HFC143a_SF6_bidsteps.csv).
+
+### Agriculture Removal
+- **Calculation**: Based on IPCC AR5 Figure 11.17, which provides mitigation potential at $20, $50, and $100/ton CO2.
+- **Linearity**: The spreadsheet applies **linear interpolation** (or a simple linear fit) between the IPCC price points to generate a more granular curve. Note that prices are negative (-$20, -$50, -$100).
+- **Bid Steps**: **57 steps** in [Agriculture_bids.csv](Data/Agriculture_bids.csv).
+
+### Seaweed Removal
+- **Calculation**: Global area (4,800m ha) is divided into equal tranches. The spreadsheet calculates $Million/million ha costs.
+- **Linearity**: The cost function is **perfectly linear**, increasing by approx -$60.35 per 10 million hectare tranche.
+- **Bid Steps**: **24 steps** in [Seaweed_bids.csv](Data/Seaweed_bids.csv), capping at the global area limit.
+
+### Forestry Sequestration
+- **Calculation**: Historically based on Stavins & Richards (2005) productivity curves. Modern implementation uses Busch (2024) clustering.
+- **Linearity**: Uses NPV calculations for land rental/opportunity cost; the resulting curves are non-linear but represented as discrete steps.
+- **Bid Steps**: **200 steps** in [Forestry_bid_steps.csv](Data/Forestry_bid_steps.csv). Sequestration schedules include **156 years** of removal data in [Forestry_sequestration.csv](Data/Forestry_sequestration.csv).
+
+## 3. Plan for prepare_inputs.py
+
+The objective is to replace the manual Excel processing with a reproducible Python script that writes directly to `smdamage_data.db`.
+
+### 1. Requirements
+- Use `pandas` for data manipulation and `openpyxl` for reading original Excel supplements.
+- Use `sqlite3` for database interaction.
+- Centralize constants (inflation rates, CO2->C conversion factor 3.66406, ha->acre 0.404687, etc.) in a `defaults.py` or similar.
+
+### 2. Processing Modules
+- **`process_carbon()`**: Automate the extraction from Anger & Sathaye (2008) Appendix, inflationary adjustment, and scaling to global FFI levels.
+- **`process_harmsen()`**: Batch process `mmc1.xlsx` and `mmc2.xlsx` for CH4, N2O, and HFC/PFC/SF6 gases.
+- **`process_agriculture()`**: Convert IPCC AR5 mitigation values (GtCO2) to negative-priced carbon removal bids (MtC).
+- **`process_seaweed()`**: Generate bid curves for seaweed sequestration based on global area limits and productivity constants.
+
+### 3. Database Execution
+- The script will bypass CSV generation and directly update `smdamage_data.db`:
+  - `INSERT` into `bidders` table (class, units, hector_name).
+  - `INSERT` into `bids` table (price_per_unit, quantity_units).
+  - Log summary statistics (total available mitigation/sequestration per pollutant) for validation.
+
+### 4. Integration with create_database.py
+- `prepare_inputs.py` will handle the "upstream" logic previously done in Excel.
+- `create_database.py` will focus on the "downstream" logic (e.g., pulling from Hector for warming factors and pulling from Busch for forestry).
+- Ideally, `prepare_inputs.py` would be called as the first step in a `rebuild_database.ps1` workflow.

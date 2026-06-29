@@ -1,45 +1,91 @@
-Examine land use constraints.
-- Are the forestry constraints tight? What is their dual price? How does it affect the revenue? Figure out how to prevent them being tight.
-- Need to explain the forestry constraints in the paper.
-- Calculate agricultural land use. Decide whether to use agriculture land constraints.
-- Calculate seaweed area use. Decide whether to use seaweed area constraints.
+Plan: move all CSV/PKL solution outputs into smdamage_solutions.db, verify full parity, then retire file writes.
 
-Run all experiments and update the paper.
-Improve Github site.
+- Write queries and plots to create each table and each figure.
+- Remove references to CSV, "series_source", and "artifact" from the database schema.
+- Double-check that no code relies on CSV nor PKL files.
+- Remove all write functions to legacy CSV files and PKL files.
+- Examine all code for dead functions.
+- Update docs and operator workflow to use DB queries/tools.
+- Prepare code for final release to Github.
 
----------------
+# I asked Claude to audit the code.
+	"Conduct a complete audit of this entire project to check for numerical accuracy. Are the units for prices in $/ton of carbon or in $/ton of carbon dioxide?
+	Are measure units consistent throughout? Does the code appear to make any mistakes in tracking measure units? Examine original data sources and data descriptions.
+	Does #sym:Price_trajectory_with_full_commitment_tau_1_6  track price per ton carbon or price per ton carbon dioxide?
+	Track the data through smdamage_data.db input through to the optimization and smdamage_solutions.db output.
+	Put the results of your audit at the bottom of this file "Work in progress...""
 
-Plan to implement a simplified linear programming column and row generation algorithm.
+## Units audit, 2026-06-29
 
-(1) Create a new standalone SQLite database named smdamage_solutions.db in the output directory to store all linear programming solutions.
-The purpose is to construct later models with a restricted number of rows and columns based on previous solutions.
-The database should track the details of each scenario. The database should track the non-zero objective function coefficients of columns.
-Indexing of tables should allow fast retrieval of variables by objective function coefficient or perhaps better yet by bid ID, assuming bid ID is ordered by increasing price, and being careful of the different signs for emitters and removers.
-Variable Indexing: Instead of "variable name," store the Bidder Name + Step Index. Column names like qapt(5,Carbon,2025.0) can be brittle if you change time-steps.
+### Summary of findings
+The code is internally consistent in using megatons of carbon (MtC) throughout for the carbon emitter/remover decision variables and their bid prices.
+The price series saved to smdamage_solutions.db via the Vpt constraint duals are in $M/MtC, i.e., dollars per ton of carbon. They are NOT per ton of CO2. The existing commented-out reminder in SMDAMAGE revenue neutral.py ("Reminder: convert $/ton C to $/ton CO2") confirms this is a known, unresolved presentation gap.
 
-Add accessors to Read from and write to the database.
-When saving a current solution, filter linear programming columns by value as to whether they are close to zero.
-Do not store columns close to zero.
+One genuine numerical issue was found: Agriculture bid prices in Agriculture_bids.csv are in $/MtC (the header says $US2022), but the quantity column header says "Mgtons C" rather than "MtC". The "M" in "Mgtons" is ambiguous — Mtons (megatons) and "Gtons" (gigatons) are contradictory prefixes.
+The data values (~87–513 Mgtons C) match the scale of MtC (megatons of carbon) not gigatons, so the actual numbers appear to be megatons. The header label "Mgtons C" is misleading — it should read "MtC".
 
-For the tau search, Use an in-memory dictionary for speed during a single run.
-Only commit to smdamage_solutions.db at the end of an experiment to serve as a long-term "warm start" for future sessions.
-smdamage_solutions.db should record the iteration number of each solution.
+### Detailed trace: carbon emitter/remover decision variable units
 
-(2) Add a new function Solve_SMDAMAGE(smdamage pulp model).
-This function first checks smdamage_solutions.db to determine the maximum breakpoint of the bid curve for each variable type,
-below which the bid was accepted in any scenario, above which the bid was rejected in every scenario.
-When "removing" variables, don't actually delete them from your Python lists. Just don't instantiate the LpVariable or don't include it in the lpSum.
-This makes "adding it back" much easier.
+**Input data (smdamage_data.db)**
+- MtC_bid_steps.csv: header is "Marginal $2020/ton C, Mtons C". Prices in $/ton C, quantities in megatons of carbon. These are scaled to global 2022 FFI baseline of 10,232 MtC.
+- Agriculture_bids.csv: header is "$US2022, Mgtons C". Prices in $/MtC (negative for removers), quantities nominally in "Mgtons C" but values are consistent with MtC scale (~87–513 units). Label is ambiguous ("Mgtons C" could be read as millions of gigtons; intended meaning is megatons).
+- Seaweed_bids.csv: header is "Million/million ha seaweed, Million tons carbon". Prices in $million/million ha, quantities in million tons carbon (= MtC). Consistent.
+- Forestry_bid_steps.csv: bid prices in $/hectare (NPV), quantities in plantable million hectares/year. Forestry bidder units in DB are 'mhectares'. Carbon removal is tracked separately in forestry_removal (tons/hectare/year). Consistent.
+- CH4_bid_steps.csv: header says "Bid price $/MtonN20, Bid qty Mton N20" — note the column header says "N20" (number 20) instead of "N2O" in both the CH4 and N2O files. The CH4 file appears to contain CH4 data (quantities are ~0.3–90 MtCH4) and the N2O file appears to contain N2O data (~0.1–1.6 MtN2O). The header label "N20" vs. "N2O" is a typo but appears to not affect data loading (the loader reads by column position, not header name).
+- C2F6_CF4_HFC125_HFC134a_HFC143a_SF6_bidsteps.csv: prices in $/kt, quantities in kt/year. Stored with units='kt' in DB. Correctly divided by 1000 in read_bids() to convert to $M/kt for objective function consistency.
 
-The function removes variables from the current unsolved model that are two steps above (more costly) the breakpoint.
-That is, we would expect two bids (within each bid curve) in the solved model to be zero.
+**create_database.py**
+- 'Carbon' bidder: units = 'mtC', hector_name = 'ffi_emissions'.
+- 'Agriculture', 'Seaweed': units = 'mtC', hector_name = 'ffi_emissions'. Both removers share the same Hector channel as Carbon (ffi), which is correct for CO2-equivalent removal via the terrestrial carbon cycle.
+- F-gases (C2F6, CF4, etc.): units = 'kt', hector_name = '{chemical}_emissions'. Correct.
 
-This function also checks for land area constraints which are binding and removes (pops) land area constraints which were non-binding in every previously solved scenario.
-When saving the solution, check constraint.slack. If slack is 0 (or very close), mark that land constraint as "Binding."
+**Warming factor pulse (Calibrated_pulses_by_chemical_2025.txt)**
+- ffi_emissions: emission_factor = 1, units = GtC/yr. Pulse values are in degrees C per GtC pulse.
+- Conversion in get_warming_effects(): Wpt_dict[('Carbon', t0)] = Pulse['ffi'][t0+1] * 1000.0 / Pulse['ffi'][0] / 1000.0. The two 1000 factors cancel: numerator 1000 converts degrees to thousandths-of-a-degree; denominator 1000 converts GtC to MtC. Net: Wpt in thousandths-of-a-degree per MtC. Correct.
+- luc_emissions: emission_factor = 1.1955, units = GtC/yr. Treated identically to ffi for Agriculture when is_removal_luc = True. Correct.
+- Non-CO2 gases (CH4, N2O, F-gases): Wpt_dict[p,t0] = Pulse[p][t0+1] * 1000.0 / Pulse[p][0]. No additional /1000 because the chemical bid quantities are already in the native Hector units (MtCH4, MtN2O, kt). Consistent.
 
-(3) The function Solve_SMDAMAGE then solves the linear program with the restricted column and row sets.
-After solution, the function checks whether the bids that were expected to be zero were positive.
-If so, the function adds the relevant columns for  two more bid steps.
-The function also checks whether any omitted land area constraints would have been binding in any scenario; if so, the function adds those constraints.
-The function omit any empty constraints. The function then solves the model again.
-The function reports with a simple print statement whether any columns or rows had to be added, and the time to solve each linear program.
+**Objective function (read_bids() in SMDAMAGE revenue neutral.py)**
+- For 'mtC' bidders: Bapt[a,p,t] = price_per_unit * discount_rate(t). Price is in $/ton C (from CSV); result is in $M/MtC after the 1.23 CPI inflation multiplier applied at solve time. So the objective coefficients are in $M/MtC discounted. Consistent with quantities (MtC).
+- For 'kt' bidders (F-gases): Bapt[a,p,t] = price_per_unit * discount_rate(t) / 1000. Price is in $/ton (kt basis), so /1000 converts to $M/kt. Correct.
+- For 'mhectares' bidders (forestry): price is NPV in $/hectare from Busch; converted to $M/mhectare in the forestry bid curve. Consistent.
+- Objective comment in solver: "All objective function coefficients should be millions of dollars." Confirmed true for Carbon and removers.
+
+**Decision variable vpt and dual price Vpt(p,t)**
+- vpt[p,t] is the total quantity of bidder p accepted in year t.
+- For Carbon: vpt['Carbon', t] is in MtC (megatons of carbon, not CO2).
+- The constraint dual pi for Vpt(Carbon,t) is the Lagrange multiplier on the quantity balance equation: vpt(p,t) = sum of qapt. Its economic interpretation is the marginal value (shadow price) of one additional unit of the pollutant in year t.
+- Units of the dual: The dual has units of [objective units] / [constraint RHS units] = $M/MtC. This equals $1 per ton of carbon (since $M/MtC = $1,000,000 / 1,000,000 tonnes = $1/tonne).
+- So: **Vpt(Carbon,t).pi is in $/ton of carbon, NOT $/ton of CO2**.
+- To convert to $/ton CO2, multiply by 12/44 = 0.2727 (the mass ratio of carbon to CO2).
+- The commented-out line in SMDAMAGE revenue neutral.py: "Reminder: convert $/ton C to $/ton CO2. Temp in 2125 is..." confirms this conversion is needed for publication but has not been applied in the output plots.
+
+**Price_trajectory_with_full_commitment_tau_1_6 in plotting_utils.py**
+- Calls get_vpt_dual_series_by_scenario_id(..., 'Carbon') which reads Vpt(Carbon,year).pi from constraint_duals.
+- The negation [-series[year]] applied in the plot call: the Vpt(Carbon,t) row is the constraint vpt(p,t) == sum(qapt), so for emitters whose qapt enters the objective with a positive coefficient, the LP standard convention makes pi < 0 (the dual is negative because relaxing the upper bound on emissions reduces cost). The negation converts this to a positive carbon price display. Economically correct.
+- Y-axis label is "Carbon price". Should note the unit: $/ton C (not $/ton CO2).
+
+**Temperature series stored in smdamage_solutions.db**
+- Source field "SMDAMAGE actual temp calibrated" and temperature_series values: stored as thousandths of a degree C (= initial_temperature + temperatureChange[t].varValue).
+Initial_temperature (e.g. 1108.916 or 981.858) is in thousandths of degrees C.
+Confirmed by units field 'thousandths_C' in scenario_series and by /1000 division in all plotting functions. Consistent.
+- "SMDAMAGE Carbon calibrated" series: stores vpt['Carbon',t].varValue in MtC. The plotting function divides by 1000 to display in gigatons. Correct.
+- "SMDAMAGE yearly revenue calibrated" series: stores yearlyrevenue[t] = sum(-vpt[p,t] * Vpt.pi) in $M. Plotting divides by 1000 to display in $billions. Correct.
+
+---
+
+### Issues found
+
+1. **Agriculture_bids.csv header ambiguity** (low severity): The quantity column header "Mgtons C" is misleading. Values are consistent with MtC (megatons of carbon). Recommend changing to "MtC" for clarity.
+
+2. **CH4_bid_steps.csv and N2O_bid_steps.csv headers typo** (cosmetic): Both files say "MtonN20" and "Mton N20" instead of "MtCH4/MtN2O". Does not affect the model because column position is used, not header text, but it is confusing.
+
+3. **Price plots are in $/ton C, not $/ton CO2** (presentation gap, confirmed known): All Vpt dual prices for Carbon, Agriculture, and Seaweed are in $/ton of carbon. For publication, divide by 12/44 ≈ 0.2727 (equivalently multiply by 44/12 ≈ 3.667) to convert to $/ton CO2. The conversion factor is already noted in data_sources.txt (CO2->C conversion factor 3.66406 cited in the plan for prepare_inputs.py). Price_trajectory_with_full_commitment_tau_1_6 inherits this gap.
+
+4. **Seaweed and Agriculture share hector_name = 'ffi_emissions'** (design note, not a bug): Both removers are treated as carbon equivalent to fossil fuel removal via the atmosphere. This is a modeling assumption, not a coding error, but worth documenting for reviewers.
+
+5. **No unit inconsistency found in Wpt computation**: The double application of ×1000 and ÷1000 in get_warming_effects() (scaleCelsius=1000 for thousandths-of-a-degree, divided by 1000 to convert GtC to MtC) is internally consistent.
+
+6. **Forestry Wpt double-scaling risk** (worth checking): The forestry convolution applies `tc * ag_wpt_arr * scaleCelsius / 1000.0` where tc is in tons/hectare/year and ag_wpt_arr is already in thousandths-of-a-degree per MtC. The /1000 converts tons/hectare to Mtons/hectare correctly.
+But since vpt[tree,t] is in mhectares, the product vpt * tc gives mhectares * tons/ha/yr = Mtons/yr, which is MtC/yr. Multiplying by Wpt (thousandths-C per MtC) then gives thousandths-C per mhectare planted. Appears correct.
+

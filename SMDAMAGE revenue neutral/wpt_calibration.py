@@ -3,11 +3,9 @@
 # we can calibrate the Wpt values in SMDAMAGE.
 # John F Raffensperger. 2022-07-27, 2022-09-10, 2025-01-05.
 
-import csv
 import importlib.util
 import matplotlib.pyplot as mplot
 import os
-import pickle
 from pulp import *
 import sys
 
@@ -26,15 +24,6 @@ sys.modules["smdamage_main"] = smdamage_main
 spec.loader.exec_module(smdamage_main)
 
 # Plotting functions moved to plotting_utils.py
-
-def write_fitted_Wpt_to_csv(): # Write the fitted Wpt values to a CSV file in rows of pollutant and columns of years. Useful for analysis in Excel.
-	with open(defaults_and_utilities.getOutputDirectory() + "SMDAMAGE_fitted_Wpt.pkl", "rb") as mypickle: Wpt_dict = pickle.load(mypickle)
-	pollutants = sorted(set(pollutant for pollutant, year in Wpt_dict.keys()))
-	years = sorted(set(year for pollutant, year in Wpt_dict.keys()))
-	with open(defaults_and_utilities.getOutputDirectory() + "SMDAMAGE_fitted_Wpt.csv", 'w', newline='', encoding='utf-8') as csv_file:
-		writer = csv.writer(csv_file)
-		writer.writerow(['Pollutant'] + years)
-		for pollutant in pollutants: writer.writerow([pollutant] + [Wpt_dict.get((pollutant, year), '') for year in years])
 
 def run_SMDAMAGE_fit_W(scenario):
 	# 	If scenario.is_removal_luc,
@@ -81,8 +70,20 @@ def run_SMDAMAGE_fit_W(scenario):
 
 	# Load Vpt_dict. ------------------------------------------------------------------------------------------
 	# Data is the previous vpt solution from SMDAMAGE and the Hector temperature.
-	my_old_vpt = defaults_and_utilities.open_pkl("SMDAMAGE " + defaults_and_utilities.experimentTag_to_file_name(scenario)) # amount of activity p in year t from solution of model P1 or P2.
-	Vpt = {(p,t): my_old_vpt[p,t].varValue for (p,t) in my_old_vpt}
+	# If scenario.use_updated_Wpt is already True, calibration still needs the pre-fit (default Wpt) run.
+	db_path = defaults_and_utilities.getSolutionsDBPath()
+	source_tag = defaults_and_utilities.getExperimentTag(scenario)
+	Vpt_scenario_id = database_interface.get_scenario_id(db_path, source_tag)
+	if Vpt_scenario_id is None and scenario.use_updated_Wpt:
+		scenario.use_updated_Wpt = False
+		fallback_tag = defaults_and_utilities.getExperimentTag(scenario)
+		Vpt_scenario_id = database_interface.get_scenario_id(db_path, fallback_tag)
+		scenario.use_updated_Wpt = True
+		if Vpt_scenario_id is None:
+			raise ValueError("Missing solutions DB scenario for Wpt calibration: " + source_tag + " or " + fallback_tag)
+	if Vpt_scenario_id is None:
+		raise ValueError("Missing solutions DB scenario for Wpt calibration: " + source_tag)
+	Vpt = database_interface.get_vpt_from_db(defaults_and_utilities.getSolutionsDBPath(), Vpt_scenario_id)
 
 	# Construct PT_set. ------------------------------------------------------------------------------------------
 	Constant_PT_set = set() # Use constant W for activities you're not trying to fit.
@@ -136,8 +137,8 @@ def run_SMDAMAGE_fit_W(scenario):
 
 			# Warming constraints. Ag, seaweed, and trees use the "luc" warming factors, but "luc" itself is not activity. No Vpt['luc',u] exists.
 			SMDAMAGE_fit_W +=  initial_Temp \
-				+ lpSum ([wpt[(p, float(t - u))]*Vpt[p,u] for (p,u) in Variable_PT_set if u <= t and p != "luc"])\
-				+ sum([Wpt_dict[(p, float(t - u))]*Vpt[p,u] for (p,u) in Constant_PT_set if u <= t])\
+				+ lpSum ([wpt[(p, float(t - u))]*Vpt.get((p,u), 0.0) for (p,u) in Variable_PT_set if u <= t and p != "luc"])\
+				+ sum([Wpt_dict[(p, float(t - u))]*Vpt.get((p,u), 0.0) for (p,u) in Constant_PT_set if u <= t])\
 				== SMDAMAGE_temp_t[t], "SMDAMAGE_Temp(" + str(t) + ")"
 
 			SMDAMAGE_fit_W += SMDAMAGE_temp_t[t] - over_error_t[t] + under_error_t[t] == HectorTemp[t], "Temp_t(" + str(t) + ")"
@@ -194,8 +195,7 @@ def run_SMDAMAGE_fit_W(scenario):
 
 	for p in Variable_w_activities:
 		for t in range(defaults_and_utilities.getPulseDataLength()): Wpt_dict[(p,float(t))] = wpt[(p, float(t))].varValue
-	# defaults_and_utilities.yourdictionary_to_CSV(Wpt_dict, "Wpt_dict " + defaults_and_utilities.experimentTag_to_file_name(scenario))
-	with open(defaults_and_utilities.getOutputDirectory() + "SMDAMAGE_fitted_Wpt.pkl", "wb") as mypickle: pickle.dump(Wpt_dict, mypickle)
+	database_interface.save_fitted_wpt(db_path, Vpt_scenario_id, Wpt_dict)
 	return initial_Temp.varValue
 
 

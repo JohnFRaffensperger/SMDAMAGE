@@ -1,7 +1,10 @@
 # Large plot files that shouldn't be committed
 *.lpt
 SMDAMAGE revenue neutral/Output/*.lpt
+SMDAMAGE revenue neutral/Output/*.csv
+SMDAMAGE revenue neutral/Output/*.db
 Data/*.lpt
+Data/*.db
 
 # Python cache files
 __pycache__/

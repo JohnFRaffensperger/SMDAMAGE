@@ -26,6 +26,7 @@ import os
 import subprocess
 from math import log10, floor
 import defaults_and_utilities
+import database_interface
 
 # This function is a property of your climate simulator, which must synchronize with the auction.
 # So if you want the auction to run every 6 months, you will have to simulate the resulting emissions and removal schedule on a 6 month basis.
@@ -175,7 +176,10 @@ def get_SMDAMAGE_emissions_dictionary (scenario):
 def convert_SMDAMAGE_solution_to_Hector_input (scenario):
 	RCP26_emissions = getHectorEmissionsDictionary("RCP26_emissions.csv")
 	SMDAMAGE_emissions = get_SMDAMAGE_emissions_dictionary (scenario)
-	carbonRemovedByForestry = defaults_and_utilities.get_tree_schedule_carbon_removal(defaults_and_utilities.open_pkl("SMDAMAGE " + defaults_and_utilities.experimentTag_to_file_name(scenario))) # getCarbonRemovedByForestry()
+	scenario_id = database_interface.get_scenario_id(defaults_and_utilities.getSolutionsDBPath(), defaults_and_utilities.getExperimentTag(scenario))
+	if scenario_id is None:
+		raise ValueError("Missing solutions DB scenario for Hector input conversion: " + defaults_and_utilities.getExperimentTag(scenario))
+	carbonRemovedByForestry = defaults_and_utilities.get_tree_schedule_carbon_removal(database_interface.get_vpt_from_db(defaults_and_utilities.getSolutionsDBPath(), scenario_id))
 	firstYear = 1765 # in RCP26_emissions.csv.
 	first_SMDAMAGE_year = int(defaults_and_utilities.getStartYear())
 	lastYear = int(defaults_and_utilities.getLastBidYear()) # because for example smdamage_solution_2070.csv includes 2169.5.
@@ -253,7 +257,9 @@ def run_Hector_with_SMDAMAGE_solution(scenario): # Goal is to get the Hector tem
 	os.chdir(original_directory)
 
 	Hector_temps = get_Hector_temperature(scenario)
-	defaults_and_utilities.append_temperatures_to_csv(scenario, "Hector with calibrated" if scenario.use_updated_Wpt else "Hector with uncalibrated", {t: Hector_temps[t] for t in defaults_and_utilities.getModelPeriods() if t <= 2300.0})
+	source = "Hector with calibrated" if scenario.use_updated_Wpt else "Hector with uncalibrated"
+	scenario_id = database_interface.get_scenario_id(defaults_and_utilities.getSolutionsDBPath(), defaults_and_utilities.getExperimentTag(scenario))
+	defaults_and_utilities.append_temperatures_to_db(scenario_id, source, {t: Hector_temps[t] for t in defaults_and_utilities.getModelPeriods() if t <= 2300.0})
 	print("Hector done. Output is in "+ hector_directory + "/output/output_" + defaults_and_utilities.experimentTag_to_file_name(scenario) + ".csv. Temp in 2125 is " + str(round(Hector_temps[2125],3)) + ".")
 	return
 
@@ -268,19 +274,6 @@ def get_Hector_temperature(scenario):
 			if line[4] == 'Tgav' and line[6].strip() == 'degC': temperature[float(line[0])] = 1000.0*float(line[5])
 	return temperature
 
-# DEPRECATED: Use database_interface.getPulse() instead
-# def getPulse(): # Retrieves the marginal change in temperature in each year after a pulse emission.
-# 	Pulse = {} # [Pulseqty, warming1, warming2, warming3,...]
-# 	# Get warming effects for 'C2F6', 'CF4', 'CH4', 'Carbon', HFC125', 'HFC134a', 'HFC143a', 'N2O', 'SF6', 'SO2'.
-# 	with open('./data/Calibrated_pulses_by_chemical_2025.txt', 'r') as pulsefile:
-# 		for line in pulsefile: # Each line looks like: ffi_emissions,13.931549999999998,GtC/yr,0.0,...
-# 			chempulse = line.split(",") # Below, we're copying the annual warming for each period in the year.
-# 			# GetPeriodsPerYear() is important because if you have more than one period per year, you need to copy the warming effect for each period in the year. For example, if you have 2 periods per year, you need to interpolate the warming effect for each period.
-# 			# Hector may have the ability to simulate climate in sub-annual periods, e.g., 2025.0, 2025.5, 2026.0, etc. If so, we would use the warming effect for each period in the year, not just once per year.
-# 			Pulse[chempulse[0].replace('_emissions','')] = [float(chempulse[1])] + [float(warming) for warming in chempulse[3:] for i in range(getPeriodsPerYear())]
-# 			# At this point, Pulse['ffi'] = [7.971, -0.0, 0.00227, 0.006247, 0.009098, ... ]. The first element is the impulse size used in Hector to find a temperature change.
-# 			# We have to normalize this, so Wput2_dict [(p, t0)] = Pulse[p1][t0+1]/Pulse[p1][0]
-# 	return Pulse
 
 
 

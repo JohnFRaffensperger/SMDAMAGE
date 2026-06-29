@@ -51,6 +51,16 @@ def get_bids(bidder_name, discount_rate=None):
 	return do_query("SELECT price_per_unit, quantity_units FROM bids WHERE bidder = ? AND (discount_rate IS NULL OR ABS(discount_rate - ?) < 1e-12) ORDER BY id",
 		(bidder_name, discount_rate),)
 
+def get_all_bids(discount_rate=None):
+	"""Returns dict {bidder_name: [(price_per_unit, quantity_units), ...]} in one query (suggestion 5)."""
+	if discount_rate is None:
+		rows = do_query("SELECT bidder, price_per_unit, quantity_units FROM bids ORDER BY bidder, id")
+	else:
+		rows = do_query("SELECT bidder, price_per_unit, quantity_units FROM bids WHERE (discount_rate IS NULL OR ABS(discount_rate - ?) < 1e-12) ORDER BY bidder, id", (discount_rate,))
+	result = {}
+	for bidder, price, qty in rows: result.setdefault(bidder, []).append((price, qty))
+	return result
+
 def get_forestry_metadata():
 	"""Retrieve metadata for all forestry bidders."""
 	rows = do_query("SELECT bidder, rotation_year, cluster_index, available_area_mhectares FROM forestry_bidder_metadata")
@@ -64,6 +74,13 @@ def get_forestry_bidder_names():
 
 def get_forestry_carbon_removal(bidder):
 	return do_query ("SELECT year, tons_per_hectare_per_year FROM forestry_removal WHERE bidder = ? ORDER BY year", (bidder,))
+
+def get_all_forestry_carbon_removal():
+	"""Returns dict {bidder_name: [(year, tc), ...]} in one query (suggestion 2)."""
+	rows = do_query("SELECT bidder, year, tons_per_hectare_per_year FROM forestry_removal ORDER BY bidder, year")
+	result = {}
+	for bidder, year, tc in rows: result.setdefault(bidder, []).append((year, tc))
+	return result
 # forestry_seq = get_forestry_carbon_removal('Loblolly_pine_150')
 # for row in forestry_seq[:6]: print(row)
 
@@ -119,4 +136,174 @@ def getPulse(): # Retrieves the marginal change in temperature in each year afte
 		Pulse[chemical_key] = pulse_list
 
 	return Pulse
+
+# =============================================================================================
+# Solutions database accessors (smdamage_solutions.db).
+# These functions use a separate DB path passed in, to avoid coupling to defaults_and_utilities.
+# =============================================================================================
+
+def save_temperature_series(db_path, scenario_id, source, year_to_value):
+	"""Insert rows into temperature_series for one (scenario_id, source) pair."""
+	conn = sqlite3.connect(db_path)
+	cursor = conn.cursor()
+	cursor.executemany(
+		"""INSERT INTO temperature_series (scenario_id, source, year, value) VALUES (?,?,?,?)
+		ON CONFLICT(scenario_id, source, year) DO UPDATE SET value=excluded.value""",
+		[(scenario_id, source, float(year), value) for year, value in year_to_value.items()])
+	conn.commit()
+	conn.close()
+
+def get_temperature_series_by_scenario_id(db_path, scenario_id, source):
+	"""Return {year: value} for one scenario id and source label."""
+	conn = sqlite3.connect(db_path)
+	cursor = conn.cursor()
+	cursor.execute("SELECT year, value FROM temperature_series WHERE scenario_id = ? AND source = ? ORDER BY year", (scenario_id, source))
+	rows = cursor.fetchall()
+	conn.close()
+	return {year: value for year, value in rows}
+
+def get_temperature_series(db_path, scenario_name, source):
+	"""Return {year: value} for the given scenario name and source label."""
+	conn = sqlite3.connect(db_path)
+	cursor = conn.cursor()
+	cursor.execute(
+		"SELECT ts.year, ts.value FROM temperature_series ts JOIN scenarios s ON s.id = ts.scenario_id WHERE s.name = ? AND ts.source = ? ORDER BY ts.year",
+		(scenario_name, source))
+	rows = cursor.fetchall()
+	conn.close()
+	return {year: value for year, value in rows}
+
+def save_fitted_wpt(db_path, calibration_scenario_id, wpt_dict):
+	"""Save fitted Wpt values, replacing any existing rows for this calibration scenario."""
+	conn = sqlite3.connect(db_path)
+	cursor = conn.cursor()
+	cursor.execute("DELETE FROM fitted_wpt WHERE calibration_scenario_id = ?", (calibration_scenario_id,))
+	cursor.executemany(
+		"INSERT INTO fitted_wpt (calibration_scenario_id, pollutant, t, value) VALUES (?,?,?,?)",
+		[(calibration_scenario_id, pollutant, int(t), value) for (pollutant, t), value in wpt_dict.items()])
+	conn.commit()
+	conn.close()
+
+def get_fitted_wpt(db_path):
+	"""Return {(pollutant, float(t)): value} from the most recently saved calibration."""
+	conn = sqlite3.connect(db_path)
+	cursor = conn.cursor()
+	cursor.execute(
+		"SELECT pollutant, t, value FROM fitted_wpt WHERE calibration_scenario_id = (SELECT MAX(calibration_scenario_id) FROM fitted_wpt)")
+	rows = cursor.fetchall()
+	conn.close()
+	return {(pollutant, float(t)): value for pollutant, t, value in rows}
+
+def get_vpt_from_db(db_path, scenario_id):
+	"""Return {(bidder, year): summed_value} reconstructed from one scenario id."""
+	conn = sqlite3.connect(db_path)
+	cursor = conn.cursor()
+	cursor.execute(
+		"SELECT v.bidder, v.year, SUM(v.value) FROM variables v WHERE v.scenario_id = ? GROUP BY v.bidder, v.year",
+		(scenario_id,))
+	rows = cursor.fetchall()
+	conn.close()
+	return {(bidder, year): value for bidder, year, value in rows}
+
+def get_scenario_id(db_path, scenario_name):
+	"""Return the id of the most recently inserted scenario with the given name, or None."""
+	conn = sqlite3.connect(db_path)
+	cursor = conn.cursor()
+	cursor.execute("SELECT id FROM scenarios WHERE name = ? ORDER BY id DESC LIMIT 1", (scenario_name,))
+	row = cursor.fetchone()
+	conn.close()
+	return row[0] if row else None
+
+def get_scenario_discount_rate(db_path, scenario_id):
+	"""Return discount_rate for the scenario id, or None if not found."""
+	conn = sqlite3.connect(db_path)
+	cursor = conn.cursor()
+	cursor.execute("SELECT discount_rate FROM scenarios WHERE id = ?", (scenario_id,))
+	row = cursor.fetchone()
+	conn.close()
+	return row[0] if row else None
+
+def get_scenario_tau(db_path, scenario_id):
+	"""Return tau for the scenario id, or None if not found."""
+	conn = sqlite3.connect(db_path)
+	cursor = conn.cursor()
+	cursor.execute("SELECT tau FROM scenarios WHERE id = ?", (scenario_id,))
+	row = cursor.fetchone()
+	conn.close()
+	return row[0] if row else None
+
+def save_scenario_series(db_path, scenario_id, series_name, year_to_value, units=None, series_source="temperature_output_csv"):
+	"""Insert rows into scenario_series for one (scenario_id, series_name) pair."""
+	conn = sqlite3.connect(db_path)
+	cursor = conn.cursor()
+	cursor.executemany(
+		"""INSERT INTO scenario_series (scenario_id, series_name, year, value, units, series_source) VALUES (?,?,?,?,?,?)
+		ON CONFLICT(scenario_id, series_name, year) DO UPDATE SET value=excluded.value, units=excluded.units, series_source=excluded.series_source""",
+		[(scenario_id, series_name, float(year), value, units, series_source) for year, value in year_to_value.items()])
+	conn.commit()
+	conn.close()
+
+def upsert_scenario_bidder_year_rows(db_path, rows):
+	"""Upsert scenario_bidder_year rows.
+	Each row: (scenario_id, bidder, year, quantity_value, pct_max_bid, dual_price, unit_label, value_source)
+	"""
+	if not rows: return
+	conn = sqlite3.connect(db_path)
+	cursor = conn.cursor()
+	cursor.executemany(
+		"""INSERT INTO scenario_bidder_year
+		(scenario_id, bidder, year, quantity_value, pct_max_bid, dual_price, unit_label, value_source)
+		VALUES (?,?,?,?,?,?,?,?)
+		ON CONFLICT(scenario_id, bidder, year) DO UPDATE SET
+		quantity_value=excluded.quantity_value,
+		pct_max_bid=excluded.pct_max_bid,
+		dual_price=excluded.dual_price,
+		unit_label=excluded.unit_label,
+		value_source=excluded.value_source""",
+		rows)
+	conn.commit()
+	conn.close()
+
+def insert_scenario_artifact(db_path, scenario_id, artifact_type, artifact_path=None, header_text=None, created_at=None, content_hash=None):
+	conn = sqlite3.connect(db_path)
+	cursor = conn.cursor()
+	cursor.execute(
+		"INSERT INTO scenario_artifacts (scenario_id, artifact_type, artifact_path, header_text, created_at, content_hash) VALUES (?,?,?,?,?,?)",
+		(scenario_id, artifact_type, artifact_path, header_text, created_at, content_hash))
+	conn.commit()
+	conn.close()
+
+def get_scenario_bidder_year(db_path, scenario_id):
+	"""Return {(bidder, year): {'quantity_value': q, 'pct_max_bid': p, 'dual_price': d, 'unit_label': u}}."""
+	conn = sqlite3.connect(db_path)
+	cursor = conn.cursor()
+	cursor.execute(
+		"SELECT bidder, year, quantity_value, pct_max_bid, dual_price, unit_label FROM scenario_bidder_year WHERE scenario_id = ?",
+		(scenario_id,))
+	rows = cursor.fetchall()
+	conn.close()
+	return {(bidder, year): {'quantity_value': q, 'pct_max_bid': p, 'dual_price': d, 'unit_label': u} for bidder, year, q, p, d, u in rows}
+
+def get_scenario_series(db_path, scenario_id, series_name):
+	"""Return {year: value} from scenario_series for one scenario and series name."""
+	conn = sqlite3.connect(db_path)
+	cursor = conn.cursor()
+	cursor.execute("SELECT year, value FROM scenario_series WHERE scenario_id = ? AND series_name = ? ORDER BY year", (scenario_id, series_name))
+	rows = cursor.fetchall()
+	conn.close()
+	return {year: value for year, value in rows}
+
+def get_vpt_dual_series_by_scenario_id(db_path, scenario_id, bidder='Carbon'):
+	"""Return {year: pi} for Vpt(bidder,year) duals from constraint_duals for one scenario."""
+	conn = sqlite3.connect(db_path)
+	cursor = conn.cursor()
+	cursor.execute("SELECT constraint_name, pi FROM constraint_duals WHERE scenario_id = ? AND constraint_name LIKE ?", (scenario_id, f"Vpt({bidder},%"))
+	rows = cursor.fetchall()
+	conn.close()
+	series = {}
+	for constraint_name, pi in rows:
+		inner = constraint_name[4:-1]
+		last_comma = inner.rfind(',')
+		series[float(inner[last_comma + 1:])] = pi
+	return series
 
