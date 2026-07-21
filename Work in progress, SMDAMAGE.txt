@@ -1,102 +1,175 @@
-Plan: move all CSV/PKL solution outputs into smdamage_solutions.db, verify full parity, then retire file writes.
+To do
 
-- Write queries and plots to create each table and each figure.
+- Use only 1 land constraint per year.
+- Add a hypothetical efficient carbon remover with no land constraints at $150/ton.
 
-
-	Estimate 3	Estimate 1	Estimate 4	Estimate 2	Estimate 5
-	Model	ST, weak contracts	LT	ST, short auctions	ST	ST, time-varying τ
-	Third party pays	$0	$4.75 trillion	$0	$0	$0
-	Average emitter price	$44.58/tC ($163.46/tCO2)	$10.94/tC ($40.13/tCO2)	$16.30/tC ($59.78/tCO2)	$16.09/tC ($59.98/tCO2)	$16.04/tC ($58.83/tCO2)
-	Average remover price	$7.33/tC ($26.86/tCO2)	$10.94/tC ($40.13/tCO2)	$10.87/tC ($39.85/tCO2)	$10.06/tC ($36.87/tCO2)	$10.10/tC ($37.04/tCO2)
-	Emissions 2025-2125	420.9 GtC	761 GtC	688 GtC	681 GtC	682 GtC
-	Removal cost 2025-2125	$20.4 trillion	$13.06 trillion	$12.7 trillion	$11.2 trillion	$10.84 trillion
-
+- In the paper, I need to explain the effect of the land area constraint:
+	- reduces removal capacity, thus lowering emissions and lowering total removal cost.
+	- tends to raise tau, so it raises prices relatively for emitters.
 
 - Remove references to CSV, "series_source", and "artifact" from the database schema.
 - Double-check that no code relies on CSV nor PKL files.
 - Remove all write functions to legacy CSV files and PKL files.
+- Eliminate duplication in smdamage_solutions.db
 - Examine all code for dead functions.
-- Update docs and operator workflow to use DB queries/tools.
+- Update docs and operator workflow to use DB queries/tools. Include toy models in repository. Consider adding an appendix with them.
 - Prepare code for final release to Github.
 
-# I asked Claude to audit the code.
-	"Conduct a complete audit of this entire project to check for numerical accuracy. Are the units for prices in $/ton of carbon or in $/ton of carbon dioxide?
-	Are measure units consistent throughout? Does the code appear to make any mistakes in tracking measure units? Examine original data sources and data descriptions.
-	Does #sym:Price_trajectory_with_full_commitment_tau_1_6  track price per ton carbon or price per ton carbon dioxide?
-	Track the data through smdamage_data.db input through to the optimization and smdamage_solutions.db output.
-	Put the results of your audit at the bottom of this file "Work in progress...""
+# Plan to update forestry contracts.
 
-## Units audit, 2026-06-29
+The SMDAMAGE solution (specifically scenario_id=45) uses forestry only with contracts of 35 years, except forestry_r35_c04 is never in the solution.
+	This means a lot of land is available, but the contracts are not economic.
+	Full rebuild: all pixels will be reprocessed with the new CONFIG settings in `0_choose_harvest_years.py`
+	(k=6, maximum_harvest_year=120, minimum_harvest_year=30, discount_rate=0.03).
+	At a big picture, this is like a tatonnement (feeling one's way) pricing process,
+	where contractors who lose out in one auction change their bids to try to win in the next auction.
 
-### Summary of findings
-The code is internally consistent in using megatons of carbon (MtC) throughout for the carbon emitter/remover decision variables and their bid prices.
-The price series saved to smdamage_solutions.db via the Vpt constraint duals are in $M/MtC, i.e., dollars per ton of carbon. They are NOT per ton of CO2. The existing commented-out reminder in SMDAMAGE revenue neutral.py ("Reminder: convert $/ton C to $/ton CO2") confirms this is a known, unresolved presentation gap.
+## Pipeline for full rebuild
 
-One genuine numerical issue was found: Agriculture bid prices in Agriculture_bids.csv are in $/MtC (the header says $US2022), but the quantity column header says "Mgtons C" rather than "MtC". The "M" in "Mgtons" is ambiguous — Mtons (megatons) and "Gtons" (gigatons) are contradictory prefixes.
-The data values (~87–513 Mgtons C) match the scale of MtC (megatons of carbon) not gigatons, so the actual numbers appear to be megatons. The header label "Mgtons C" is misleading — it should read "MtC".
+### DONE. Step 1. Run `0_choose_harvest_years.py`.
+— CONFIG is set as: k=6, discount_rate=0.03, minimum_harvest_year=30, maximum_harvest_year=120.
+- The script writes choose_harvest_years_mapping.csv with the chosen years.
 
-### Detailed trace: carbon emitter/remover decision variable units
+- In `1_import_Busch2024_to_SMDAMAGE.py`, `load_harvest_year_buckets()` reads choose_harvest_years_mapping.csv
+	and sets any pixel whose Faustmann-optimal year falls below the CSV minimum
+	to the smallest chosen representative (see Design note below).
+- Document: record the chosen years in `Busch data work in progress.txt`.
 
-**Input data (smdamage_data.db)**
-- MtC_bid_steps.csv: header is "Marginal $2020/ton C, Mtons C". Prices in $/ton C, quantities in megatons of carbon. These are scaled to global 2022 FFI baseline of 10,232 MtC.
-- Agriculture_bids.csv: header is "$US2022, Mgtons C". Prices in $/MtC (negative for removers), quantities nominally in "Mgtons C" but values are consistent with MtC scale (~87–513 units). Label is ambiguous ("Mgtons C" could be read as millions of gigtons; intended meaning is megatons).
-- Seaweed_bids.csv: header is "Million/million ha seaweed, Million tons carbon". Prices in $million/million ha, quantities in million tons carbon (= MtC). Consistent.
-- Forestry_bid_steps.csv: bid prices in $/hectare (NPV), quantities in plantable million hectares/year. Forestry bidder units in DB are 'mhectares'. Carbon removal is tracked separately in forestry_removal (tons/hectare/year). Consistent.
-- CH4_bid_steps.csv: header says "Bid price $/MtonN20, Bid qty Mton N20" — note the column header says "N20" (number 20) instead of "N2O" in both the CH4 and N2O files. The CH4 file appears to contain CH4 data (quantities are ~0.3–90 MtCH4) and the N2O file appears to contain N2O data (~0.1–1.6 MtN2O). The header label "N20" vs. "N2O" is a typo but appears to not affect data loading (the loader reads by column position, not header name).
-- C2F6_CF4_HFC125_HFC134a_HFC143a_SF6_bidsteps.csv: prices in $/kt, quantities in kt/year. Stored with units='kt' in DB. Correctly divided by 1000 in read_bids() to convert to $M/kt for objective function consistency.
+- Design note: rotation assignment must precede the carbon calculations
+When a pixel’s Faustmann-optimal rotation T* is shorter than the assigned contract length T_assigned
+(e.g., T*=3 but the bucket floor is 30), the carbon schedule and the bid price must reflect T_assigned for the database:
 
-**create_database.py**
-- 'Carbon' bidder: units = 'mtC', hector_name = 'ffi_emissions'.
-- 'Agriculture', 'Seaweed': units = 'mtC', hector_name = 'ffi_emissions'. Both removers share the same Hector channel as Carbon (ffi), which is correct for CO2-equivalent removal via the terrestrial carbon cycle.
-- F-gases (C2F6, CF4, etc.): units = 'kt', hector_name = '{chemical}_emissions'. Correct.
+1. Carbon schedule. The year-by-year tC_per_ha_per_year profile is determined by g_harvestyear
+   inside the plantation year loops in process_country(). If load_harvest_year_buckets() sets
+   T*=3 to T_assigned=30 before those loops run, the modulo harvest arithmetic uses 30, so the
+   carbon profile reflects 30 years of uninterrupted forest growth — not cyclic 3-year clear-cuts.
+   That is the carbon schedule in SMDAMAGE for a 30-year contract.
 
-**Warming factor pulse (Calibrated_pulses_by_chemical_2025.txt)**
-- ffi_emissions: emission_factor = 1, units = GtC/yr. Pulse values are in degrees C per GtC pulse.
-- Conversion in get_warming_effects(): Wpt_dict[('Carbon', t0)] = Pulse['ffi'][t0+1] * 1000.0 / Pulse['ffi'][0] / 1000.0. The two 1000 factors cancel: numerator 1000 converts degrees to thousandths-of-a-degree; denominator 1000 converts GtC to MtC. Net: Wpt in thousandths-of-a-degree per MtC. Correct.
-- luc_emissions: emission_factor = 1.1955, units = GtC/yr. Treated identically to ffi for Agriculture when is_removal_luc = True. Correct.
-- Non-CO2 gases (CH4, N2O, F-gases): Wpt_dict[p,t0] = Pulse[p][t0+1] * 1000.0 / Pulse[p][0]. No additional /1000 because the chemical bid quantities are already in the native Hector units (MtCH4, MtN2O, kt). Consistent.
+2. Bid price. write_single_rate_npv_to_table() computes:
+     bid = establishment_cost + crop_va × annuity(T_assigned) − wood_revenue(T_assigned)
+   At T_assigned > T*, the landowner foregoes more agricultural income (longer annuity) and receives
+   wood revenue later and less frequently. The bid is therefore higher than at T*, which is
+   economically correct: offering a sub-optimal rotation requires more compensation.
 
-**Objective function (read_bids() in SMDAMAGE revenue neutral.py)**
-- For 'mtC' bidders: Bapt[a,p,t] = price_per_unit * discount_rate(t). Price is in $/ton C (from CSV); result is in $M/MtC after the 1.23 CPI inflation multiplier applied at solve time. So the objective coefficients are in $M/MtC discounted. Consistent with quantities (MtC).
-- For 'kt' bidders (F-gases): Bapt[a,p,t] = price_per_unit * discount_rate(t) / 1000. Price is in $/ton (kt basis), so /1000 converts to $M/kt. Correct.
-- For 'mhectares' bidders (forestry): price is NPV in $/hectare from Busch; converted to $M/mhectare in the forestry bid curve. Consistent.
-- Objective comment in solver: "All objective function coefficients should be millions of dollars." Confirmed true for Carbon and removers.
+Mechanism: load_harvest_year_buckets() in `1_import_Busch2024_to_SMDAMAGE.py` builds a dict
+{original_year: chosen_year} from the CSV, then pre-fills every year below the CSV minimum with
+min(chosen_years). Since calculate_harvest_year() applies this dict to the raw Faustmann series,
+all pixels receive a bucket representative before process_country() runs its carbon year loops.
 
-**Decision variable vpt and dual price Vpt(p,t)**
-- vpt[p,t] is the total quantity of bidder p accepted in year t.
-- For Carbon: vpt['Carbon', t] is in MtC (megatons of carbon, not CO2).
-- The constraint dual pi for Vpt(Carbon,t) is the Lagrange multiplier on the quantity balance equation: vpt(p,t) = sum of qapt. Its economic interpretation is the marginal value (shadow price) of one additional unit of the pollutant in year t.
-- Units of the dual: The dual has units of [objective units] / [constraint RHS units] = $M/MtC. This equals $1 per ton of carbon (since $M/MtC = $1,000,000 / 1,000,000 tonnes = $1/tonne).
-- So: **Vpt(Carbon,t).pi is in $/ton of carbon, NOT $/ton of CO2**.
-- To convert to $/ton CO2, multiply by 12/44 = 0.2727 (the mass ratio of carbon to CO2).
-- The commented-out line in SMDAMAGE revenue neutral.py: "Reminder: convert $/ton C to $/ton CO2. Temp in 2125 is..." confirms this conversion is needed for publication but has not been applied in the output plots.
+### DONE. Step 2. Full re-import — `1_import_Busch2024_to_SMDAMAGE.py`
+- Re-run from scratch (initialize_smdamage_database() drops and recreates the tables).
+- load_harvest_year_buckets() reads the CSV written in Step 1 automatically; the lower bound on harvest year
+  described in the Design note ensures all pixels enter the carbon loops with relatively long harvest years.
+- Document: record the total pixel count and rotation year distribution in `Busch data work in progress.txt`.
 
-**Price_trajectory_with_full_commitment_tau_1_6 in plotting_utils.py**
-- Calls get_vpt_dual_series_by_scenario_id(..., 'Carbon') which reads Vpt(Carbon,year).pi from constraint_duals.
-- The negation [-series[year]] applied in the plot call: the Vpt(Carbon,t) row is the constraint vpt(p,t) == sum(qapt), so for emitters whose qapt enters the objective with a positive coefficient, the LP standard convention makes pi < 0 (the dual is negative because relaxing the upper bound on emissions reduces cost). The negation converts this to a positive carbon price display. Economically correct.
-- Y-axis label is "Carbon price". Should note the unit: $/ton C (not $/ton CO2).
+### Step 3. Re-cluster all pixels — `2_k_means_carbon_removal.py`
+- Re-run k-means on all pixels grouped by rotation year.
+- This produces new cluster_index assignments and new carbon_removal_schedules rows.
+- Document: record the new cluster counts per rotation year in `Busch data work in progress.txt`.
 
-**Temperature series stored in smdamage_solutions.db**
-- Source field "SMDAMAGE actual temp calibrated" and temperature_series values: stored as thousandths of a degree C (= initial_temperature + temperatureChange[t].varValue).
-Initial_temperature (e.g. 1108.916 or 981.858) is in thousandths of degrees C.
-Confirmed by units field 'thousandths_C' in scenario_series and by /1000 division in all plotting functions. Consistent.
-- "SMDAMAGE Carbon calibrated" series: stores vpt['Carbon',t].varValue in MtC. The plotting function divides by 1000 to display in gigatons. Correct.
-- "SMDAMAGE yearly revenue calibrated" series: stores yearlyrevenue[t] = sum(-vpt[p,t] * Vpt.pi) in $M. Plotting divides by 1000 to display in $billions. Correct.
+### Step 4. Import k-means CSV results — `3_import_k_means_csv_to_sqlite.py`
+- Run the import script to load the new cluster centers and pixel assignments into
+  Busch2024_to_SMDAMAGE.sqlite (carbon_removal_schedules table and cluster_index column).
 
----
+### Step 5. Recompute NPV bid costs — `4_move_Busch_data_to_SMDAMAGE.py`
+- Call write_single_rate_npv_to_table() for all four discount rates for all
+  (selected_rotation_year_int, cluster_index) combinations.
+- Steps 3–4 must precede this (write_single_rate_npv_to_table() filters by cluster_index).
 
-### Issues found
+### Step 6. Rebuild bid curves — `4_move_Busch_data_to_SMDAMAGE.py`
+- Call prepare_bid_curve_run() to drop and recreate forestry_bid_curves.
+- Call write_bid_steps_for_cluster() for all (rotation_year, cluster_index, discount_rate) triples.
 
-1. **Agriculture_bids.csv header ambiguity** (low severity): The quantity column header "Mgtons C" is misleading. Values are consistent with MtC (megatons of carbon). Recommend changing to "MtC" for clarity.
+### Step 7. Rebuild SMDAMAGE data DB — `create_database.py`
+- Re-run create_database() (prototype-first: drop and recreate).
+- load_forestry_from_busch_sqlite() will pick up all bidders automatically —
+  no change to create_database.py is needed.
 
-2. **CH4_bid_steps.csv and N2O_bid_steps.csv headers typo** (cosmetic): Both files say "MtonN20" and "Mton N20" instead of "MtCH4/MtN2O". Does not affect the model because column position is used, not header text, but it is confusing.
+### Handoff: Busch → SMDAMAGE
+- In `Busch data work in progress.txt`: confirm the new bidder names now live in
+  Busch2024_to_SMDAMAGE.sqlite (forestry_bid_curves), list the new rotation years and
+  cluster counts, and note the discount_rate used for bid curves.
+- In this file: add a note below with the new bidder names expected and the scenario_id to run.
+- Architecture reference: `Plan_moving_Busch_forestry_data_to_SMDAMAGE.txt` describes the
+  stable column contracts between the two projects; update it if any schema changes were made.
 
-3. **Price plots are in $/ton C, not $/ton CO2** (presentation gap, confirmed known): All Vpt dual prices for Carbon, Agriculture, and Seaweed are in $/ton of carbon. For publication, divide by 12/44 ≈ 0.2727 (equivalently multiply by 44/12 ≈ 3.667) to convert to $/ton CO2. The conversion factor is already noted in data_sources.txt (CO2->C conversion factor 3.66406 cited in the plan for prepare_inputs.py). Price_trajectory_with_full_commitment_tau_1_6 inherits this gap.
+### Tatonnement: reviewing results and iterating
+- After SMDAMAGE runs, query which contracts are in the solution and which are unused.
+- Document here: record accepted and rejected bidders and the new scenario_id.
+- If unused contracts remain and further term changes are warranted, return to Step 1 with
+  updated CONFIG parameters and repeat Steps 1–7.
+- Stop when accepted contracts cover the target land area or the marginal removal gain is negligible.
 
-4. **Seaweed and Agriculture share hector_name = 'ffi_emissions'** (design note, not a bug): Both removers are treated as carbon equivalent to fossil fuel removal via the atmosphere. This is a modeling assumption, not a coding error, but worth documenting for reviewers.
+### What does NOT need to change
+- create_database.py: bidder_name_for(), load_forestry_from_busch_sqlite() — no changes needed.
+- SMDAMAGE revenue neutral.py, database_interface.py, defaults_and_utilities.py — no changes needed.
 
-5. **No unit inconsistency found in Wpt computation**: The double application of ×1000 and ÷1000 in get_warming_effects() (scaleCelsius=1000 for thousandths-of-a-degree, divided by 1000 to convert GtC to MtC) is internally consistent.
+=========================================================
+How 1_import_Busch2024_to_SMDAMAGE.py works
 
-6. **Forestry Wpt double-scaling risk** (worth checking): The forestry convolution applies `tc * ag_wpt_arr * scaleCelsius / 1000.0` where tc is in tons/hectare/year and ag_wpt_arr is already in thousandths-of-a-degree per MtC. The /1000 converts tons/hectare to Mtons/hectare correctly.
-But since vpt[tree,t] is in mhectares, the product vpt * tc gives mhectares * tons/ha/yr = Mtons/yr, which is MtC/yr. Multiplying by Wpt (thousandths-C per MtC) then gives thousandths-C per mhectare planted. Appears correct.
+Example algebraic description: natural regeneration for one explicit case
 
+Choose one pixel with these inputs after the screen filters:
+- country in the Americas, fao_ecoz = 12, so the code uses nr_rootshoot = 0.2845.
+- nr_A = 80
+- nr_k = 0.03
+- crop_va = 50 USD/ha/year
+- nr_cost in the raw Busch data = 500 USD/ha in 2011 dollars
+- time horizon T = 120 years
+
+Step 1. Convert natural-regeneration cost to 2020 dollars.
+The code multiplies nr_cost by 1.1577: nr_cost_2020 = 500 x 1.1577 = 578.85 USD/ha
+
+Step 2. Pick the natural-regeneration root:shoot ratio.
+For this explicit branch, fao_ecoz = 12 and continent = AMER, so the code uses the lookup nr_rootshoot = 0.2845.
+
+Step 3. Compute cumulative natural-regeneration carbon at year t.
+In the code, natural-regeneration cumulative carbon per hectare is
+C_nr(t) = (AGB_C_POOL + BGB_C_POOL x nr_rootshoot) x nr_A x (1 - e^(-nr_k t))^2
+          + SOIL_C_POOL x t x (NATURAL_SOIL_C + PLANTATION_SOIL_C)
+
+Here all carbon-pool switches are 1, so this becomes
+C_nr(t) = (1 + 0.2845) x 80 x (1 - e^(-0.03 t))^2 + t x (0.415107735 + 0.092749069)
+	 = 102.76 x (1 - e^(-0.03 t))^2 + 0.507856804 x t
+
+Interpretation:
+- the first term is aboveground plus belowground biomass from the Chapman-Richards curve
+- the second term is the soil-carbon term added linearly each year in this implementation
+
+Step 4. Compute total natural-regeneration carbon at the 120-year horizon.
+
+At t = 120, (1 - e^(-0.03 x 120))^2 = (1 - e^(-3.6))^2 about 0.946099
+so biomass carbon is 102.76 x 0.946099 about 97.2211 tC/ha
+and soil carbon is 0.507856804 x 120 about 60.9428 tC/ha
+
+Therefore C_nr(120) about 97.2211 + 60.9428 = 158.1640 tC/ha
+This is the code variable nr_wohrv_total_tC_per_ha for this pixel.
+
+Step 5. Convert cumulative carbon into annual removals for export.
+The database table tC_per_h_per_year stores annual increments, not the cumulative stock.
+So the code computes
+annual_nr(1) = C_nr(1)
+annual_nr(t) = C_nr(t) - C_nr(t - 1) for t >= 2
+
+For this example,
+annual_nr(1) about 0.5976 tC/ha/year
+annual_nr(2) about 0.7666 tC/ha/year
+and so on through year 120.
+
+Step 6. Compute natural-regeneration cost-effectiveness.
+The code calculates
+	nr_costeff = (crop_va x T + nr_cost_2020) / (3.67 x C_nr(T))
+		= (50 x 120 + 578.85) / (3.67 x 158.1640) = 6578.85 / 580.4619, about 11.33 USD/tCO2
+
+This is the code variable nr_wohrv_costeff_USD_per_tCO2.
+
+Step 7. If natural regeneration beats plantation, export fields are written as follows.
+If the plantation comparison implies refortype_whrv_tCO2_per_USD = "N", the output row uses
+- selected_option = natural_regeneration
+- selected_A = nr_A = 80
+- selected_k = nr_k = 0.03
+- selected_rotation_year = 120
+- selected_establishment_cost_USD_per_ha = nr_cost_2020 = 578.85
+- p_USD_per_tC_harvested = 0
+
+Important note: the code does compute nr_harvestyear from the Faustmann rule, but for a natural-regeneration winner it does not export that year as selected_rotation_year. The export writes the full time horizon, 120, for natural regeneration.
