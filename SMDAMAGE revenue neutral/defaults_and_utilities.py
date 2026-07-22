@@ -54,6 +54,8 @@ def ensure_solutions_db():
 			FOREIGN KEY (scenario_id) REFERENCES scenarios(id));
 		CREATE UNIQUE INDEX IF NOT EXISTS uq_scenario_series ON scenario_series(scenario_id, series_name, year);
 		CREATE INDEX IF NOT EXISTS idx_scenario_series_name ON scenario_series(scenario_id, series_name);""")
+	try: cursor.execute("ALTER TABLE scenarios ADD COLUMN calibrated_initial_temp REAL")
+	except Exception: pass # Column already exists.
 	conn.commit()
 	conn.close()
 
@@ -86,7 +88,7 @@ def Hector_output_file_name(scenario): return getOutputDirectory() + "Hector_out
 # These are the market participants. Emitters face tax tau. Removers do not.
 def getEmitters(): return [b['bidder_name'] for b in database_interface.get_bidders() if b['class'].lower() == 'emitter']
 def getRemovers(): return [b['bidder_name'] for b in database_interface.get_bidders() if b['class'].lower() == 'remover']
-def getChemicals(): return ['C2F6', 'CF4', 'HFC125', 'HFC134a', 'HFC143a', 'SF6'] # Must be within Emitters.
+def getChemicals(): return ['C2F6', 'CF4', 'CH4', 'HFC125', 'HFC134a', 'HFC143a', 'N2O', 'SF6'] # Must be within Emitters.
 # TreeTypes must be within Removers.
 def getTreeTypes():	return database_interface.get_forestry_bidder_names()
 

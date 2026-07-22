@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Create SQLite database for SMDAMAGE CSV data. Produced by Claude with JFR's guidance.
+Create SQLite database for SMDAMAGE CSV data. Produced by Claude with JFR's guidance. 21 July 3036.
 """
 # >>> Part I. Preliminaries, inputs, key parameters: create_database.py, database_interface.py, and defaults_and_utilities.py.
 # Part II. Getting pulse information from Hector: hector_interface.py.
@@ -218,8 +218,9 @@ def bidder_name_for(rotation_year, cluster_index): return f"Forestry_r{int(rotat
 def get_busch_db_path(): return os.getenv(BUSCH_DB_ENV_VAR, BUSCH_DB_DEFAULT)
 
 def load_forestry_from_busch_sqlite():
-	"""Direct forestry import pipeline from Busch SQLite into bidders, bids, and forestry_removal."""
-	zero_tolerance = 1e-12
+	"""Direct forestry import pipeline from Busch SQLite into bidders, bids, and forestry_removal.
+	Reads the new schema: Pixel_bids, cluster_carbon_schedules_{years}, cluster_forestry_bid_curves_{years}.
+	"""
 	busch_db_path = get_busch_db_path()
 	if not os.path.exists(busch_db_path):
 		print(f"⚠ Busch SQLite not found: {busch_db_path}")
@@ -237,79 +238,64 @@ def load_forestry_from_busch_sqlite():
 		target_cur.execute('BEGIN')
 		print("Forestry import: transaction started")
 
-		# 1) Insert forestry bidders using bidder-specific area and contract years.
-		# Use carbon_removal_schedules first because it is much smaller and avoids long scans on Undiscounted_dta_output.
-		print("Forestry import: loading bidder areas from carbon_removal_schedules")
-		bidder_rows = source_cur.execute('''SELECT CAST(ROUND(selected_rotation_year) AS INTEGER), cluster_index, MAX(total_area_ha) FROM carbon_removal_schedules
-			GROUP BY CAST(ROUND(selected_rotation_year) AS INTEGER), cluster_index ORDER BY CAST(ROUND(selected_rotation_year) AS INTEGER), cluster_index''').fetchall()
+		# 1) Discover contract years.
+		contract_years_list = [r[0] for r in source_cur.execute(
+			'SELECT DISTINCT contract_years FROM Pixel_bids ORDER BY contract_years')]
+		if not contract_years_list:
+			print("⚠ Forestry import: no contract_years found in Pixel_bids")
+			return
 
-		if not bidder_rows:
-			print("Forestry import: no area rows in carbon_removal_schedules, falling back to Undiscounted_dta_output")
-			bidder_rows = source_cur.execute('''SELECT selected_rotation_year_int, cluster_index, SUM(area_ha) FROM Undiscounted_dta_output
-				GROUP BY selected_rotation_year_int, cluster_index ORDER BY selected_rotation_year_int, cluster_index''').fetchall()
-
+		# 2) Insert forestry bidders: one per (contract_years, cluster_id).
+		print("Forestry import: loading bidder areas from Pixel_bids")
 		insert_bidders = []
 		insert_bidder_metadata = []
-		for rotation_year, cluster_index, area_ha_sum in bidder_rows:
-			bidder_name = bidder_name_for(rotation_year, cluster_index)
-			description = f"Forestry clustered bidder r{int(rotation_year)} c{int(cluster_index)}"
-			insert_bidders.append((bidder_name, 'Remover', 'mhectares', int(rotation_year), 'ffi_emissions', description))
-			insert_bidder_metadata.append((bidder_name, int(rotation_year), int(cluster_index), float(area_ha_sum)/1_000_000.0))
+		for years in contract_years_list:
+			area_rows = source_cur.execute(
+				'SELECT cluster_id, SUM(area_ha) FROM Pixel_bids WHERE contract_years = ? GROUP BY cluster_id ORDER BY cluster_id',
+				(years,)).fetchall()
+			for cluster_id, area_ha_sum in area_rows:
+				bidder_name = bidder_name_for(years, cluster_id)
+				description = f"Forestry clustered bidder r{years} c{cluster_id}"
+				insert_bidders.append((bidder_name, 'Remover', 'mhectares', int(years), 'ffi_emissions', description))
+				insert_bidder_metadata.append((bidder_name, int(years), int(cluster_id), float(area_ha_sum) / 1_000_000.0))
 
-		target_cur.executemany("INSERT INTO bidders (bidder, class, units, contract_years, hector_name, description) VALUES (?, ?, ?, ?, ?, ?)", insert_bidders,)
-		target_cur.executemany("INSERT INTO forestry_bidder_metadata (bidder, rotation_year, cluster_index, available_area_mhectares) VALUES (?, ?, ?, ?)", insert_bidder_metadata,)
+		target_cur.executemany("INSERT INTO bidders (bidder, class, units, contract_years, hector_name, description) VALUES (?, ?, ?, ?, ?, ?)", insert_bidders)
+		target_cur.executemany("INSERT INTO forestry_bidder_metadata (bidder, rotation_year, cluster_index, available_area_mhectares) VALUES (?, ?, ?, ?)", insert_bidder_metadata)
 		print(f"Forestry import: inserted {len(insert_bidders)} forestry bidders")
 
-		# 2) Insert forestry bid steps from forestry_bid_curves for all discount rates.
+		# 3) Insert forestry bid steps from cluster_forestry_bid_curves_{years} for all discount rates.
+		# discount_rate_00 is stored as integer (e.g. 30 means 3.0%); convert to decimal for bids table.
 		print("Forestry import: loading forestry bid curves for all discount rates")
-		curve_rows = source_cur.execute('''SELECT selected_rotation_year_int, cluster_index, bucket_id, npv_max_per_ha, area_ha_sum, discount_rate
-			FROM forestry_bid_curves ORDER BY selected_rotation_year_int, cluster_index, discount_rate, bucket_id''').fetchall()
-
 		insert_bids = []
-		for rotation_year, cluster_index, bucket_id, npv_max_per_ha, area_ha_sum, discount_rate in curve_rows:
-			bidder_name = bidder_name_for(rotation_year, cluster_index)
-			price_per_unit = -float(npv_max_per_ha) # SMDAMAGE remover bids are costs (negative values).
-			quantity_units = float(area_ha_sum) / 1_000_000.0
-			insert_bids.append((bidder_name, price_per_unit, quantity_units, float(discount_rate)))
+		for years in contract_years_list:
+			curve_table = f"cluster_forestry_bid_curves_{years}"
+			curve_rows = source_cur.execute(
+				f'SELECT cluster_id, discount_rate_00, bid_step, npv_max_per_ha, step_area_ha FROM {curve_table} ORDER BY cluster_id, discount_rate_00, bid_step'
+			).fetchall()
+			for cluster_id, discount_rate_00, bid_step, npv_max_per_ha, step_area_ha in curve_rows:
+				bidder_name = bidder_name_for(years, cluster_id)
+				price_per_unit = -float(npv_max_per_ha) # SMDAMAGE remover bids are costs (negative values).
+				quantity_units = float(step_area_ha) / 1_000_000.0
+				discount_rate = discount_rate_00 / 1000.0
+				insert_bids.append((bidder_name, price_per_unit, quantity_units, discount_rate))
 
-		target_cur.executemany("INSERT INTO bids (bidder, price_per_unit, quantity_units, discount_rate) VALUES (?, ?, ?, ?)", insert_bids, )
+		target_cur.executemany("INSERT INTO bids (bidder, price_per_unit, quantity_units, discount_rate) VALUES (?, ?, ?, ?)", insert_bids)
 		print(f"Forestry import: inserted {len(insert_bids)} forestry bid rows")
 
-		# 3) Insert forestry carbon removal schedules.
+		# 4) Insert forestry carbon removal schedules from cluster_carbon_schedules_{years}.
 		print("Forestry import: loading carbon removal schedules")
-		removal_rows = source_cur.execute('''SELECT selected_rotation_year, cluster_index, year, tC_per_ha_per_year
-			FROM carbon_removal_schedules ORDER BY selected_rotation_year, cluster_index, year''').fetchall()
-
-		rows_by_bidder = {}
-		for selected_rotation_year, cluster_index, year, tc_per_ha_per_year in removal_rows:
-			rotation_year = int(round(selected_rotation_year))
-			bidder_name = bidder_name_for(rotation_year, cluster_index)
-			if bidder_name not in rows_by_bidder:
-				rows_by_bidder[bidder_name] = {'contract_years': rotation_year, 'rows': []}
-			rows_by_bidder[bidder_name]['rows'].append((int(year), float(tc_per_ha_per_year)))
-
 		insert_removal = []
-		dropped_out_of_contract_rows = 0
-		violations = []
-		for bidder_name, bidder_data in rows_by_bidder.items():
-			contract_years = int(bidder_data['contract_years'])
-			bidder_rows = sorted(bidder_data['rows'], key=lambda x: x[0])
-			start_year = bidder_rows[0][0]
-			last_contract_year = start_year + contract_years - 1
+		for years in contract_years_list:
+			carbon_table = f"cluster_carbon_schedules_{years}"
+			removal_rows = source_cur.execute(
+				f'SELECT cluster_id, growth_year, tC_per_ha_per_year FROM {carbon_table} ORDER BY cluster_id, growth_year'
+			).fetchall()
+			for cluster_id, growth_year, tc_per_ha_per_year in removal_rows:
+				bidder_name = bidder_name_for(years, cluster_id)
+				insert_removal.append((bidder_name, int(growth_year), float(tc_per_ha_per_year)))
 
-			for year, tc_per_ha_per_year in bidder_rows:
-				if year > last_contract_year:
-					dropped_out_of_contract_rows += 1
-					if abs(tc_per_ha_per_year) > zero_tolerance: violations.append((bidder_name, year, tc_per_ha_per_year, last_contract_year))
-					continue
-				insert_removal.append((bidder_name, year, tc_per_ha_per_year))
-
-		if violations:
-			example_lines = [f"{bidder} year={year} value={value:.6g} last_contract_year={cutoff}" for bidder, year, value, cutoff in violations[:10]]
-			raise ValueError("Found non-zero forestry_removal values beyond contract year. " f"violations={len(violations)}. Examples: " + "; ".join(example_lines))
-
-		target_cur.executemany("INSERT INTO forestry_removal (bidder, year, tons_per_hectare_per_year) VALUES (?, ?, ?)", insert_removal,)
-		print(f"Forestry import: inserted {len(insert_removal)} forestry removal rows (dropped {dropped_out_of_contract_rows} rows beyond contract years)")
+		target_cur.executemany("INSERT INTO forestry_removal (bidder, year, tons_per_hectare_per_year) VALUES (?, ?, ?)", insert_removal)
+		print(f"Forestry import: inserted {len(insert_removal)} forestry removal rows")
 
 		target_conn.commit()
 		print(f"Loaded forestry from Busch SQLite: {len(insert_bidders)} bidders, {len(insert_bids)} bids (all discount rates), {len(insert_removal)} removal rows")

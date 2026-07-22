@@ -34,7 +34,7 @@ def run_SMDAMAGE_fit_W(scenario):
 	# 		apply Wpt_dict[('Carbon',t)] for ['Agriculture', 'Seaweed'] + getTreetypes().
 
 	Emitters = defaults_and_utilities.getEmitters() # ['Carbon', 'C2F6', 'CF4', 'CH4', 'HFC125', 'HFC134a', 'HFC143a', 'N2O','SF6']
-	Removers = defaults_and_utilities.getRemovers() # ['Agriculture', 'Seaweed', 'Loblolly_pine_150', 'Ponderosa_pine_150', 'Black_walnut_150', 'Loblolly_pine_10', 'Ponderosa_pine_10', 'Black_walnut_10', 'Loblolly_pine_24', 'Ponderosa_pine_103', 'Black_walnut_55']
+	Removers = defaults_and_utilities.getRemovers() # ['Agriculture', 'Seaweed', ...]
 	Pulse = database_interface.getPulse() # Reads the Pulse input file from database. Includes 'luc'.
 
 	# Load default Wpt_dict. ------------------------------------------------------------------------------------------
@@ -58,7 +58,7 @@ def run_SMDAMAGE_fit_W(scenario):
 		# Seaweed has same cooling effects as Agriculture, following either "luc" or "ffi" in Hector. Degrees C in warmingperiod per million tons emitted in emissionperiod. Divide by 1000 because Carbon pulse units are degrees C/gigaton.
 		Wpt_dict [('Seaweed', float(t0))] = Wpt_dict [('Agriculture', float(t0))]
 
-	Treetypes = defaults_and_utilities.getTreeTypes() #['Loblolly_pine_150', 'Ponderosa_pine_150', 'Black_walnut_150', 'Loblolly_pine_10', 'Ponderosa_pine_10', 'Black_walnut_10', 'Loblolly_pine_24', 'Ponderosa_pine_103', 'Black_walnut_55']
+	Treetypes = defaults_and_utilities.getTreeTypes()
 	# A hectare of tree planting convolves into future carbon removal, which convolves into future cooling.
 	# Forestry, cooling effects. Convolution of tree growth with carbon pulse. Degrees C in warmingperiod per million tons sequestered in emissionperiod. Divide by 1000 because Carbon pulse units are degrees C/gigaton.
 	for tree in Treetypes:
@@ -117,8 +117,8 @@ def run_SMDAMAGE_fit_W(scenario):
 	under_error_t = {t: LpVariable("under_error_t(" + str(t) + ")", 0.0, None) for t in defaults_and_utilities.getModelPeriods()} # error above HectorTempt in year t.
 	SMDAMAGE_temp_t = {t: LpVariable("SMDAMAGE_temp_t(" + str(t) + ")", None, None) for t in defaults_and_utilities.getModelPeriods()} # Implied SMDAMAGE temperature.
 
-	W_over_error_t = {t: LpVariable("over_error_t(" + str(t) + ")", 0.0, None) for t in range(defaults_and_utilities.getPulseDataLength())} # error below HectorTempt in year t.
-	W_under_error_t = {t: LpVariable("under_error_t(" + str(t) + ")", 0.0, None) for t in range(defaults_and_utilities.getPulseDataLength())} # error above HectorTempt in year t.
+	# W_over_error_t = {t: LpVariable("over_error_t(" + str(t) + ")", 0.0, None) for t in range(defaults_and_utilities.getPulseDataLength())} # error below HectorTempt in year t.
+	# W_under_error_t = {t: LpVariable("under_error_t(" + str(t) + ")", 0.0, None) for t in range(defaults_and_utilities.getPulseDataLength())} # error above HectorTempt in year t.
 	initial_Temp = LpVariable("initial_Temp", None, None)
 	# initial_ghg_p = {p: LpVariable("initial_ghg_p(" + str(p) + ")", 0.0, None) for p in Emitters}
 
@@ -164,7 +164,7 @@ def run_SMDAMAGE_fit_W(scenario):
 
 	# Constraints: convolution for trees.  --------------------
 	for tree in Treetypes: # If tree is planted in year 0, it sequesters from database in each sequesterperiod.
-		# Example: wpt[5] = growth[0]*wpt[5] + growth[1]*wpt[4] + growth[2]*wpt[3] + growth[3]*wpt[2] + growth[4]*wpt[1] + growth[5]*wpt[0]
+		# Example: wpt[5] = growth[0]*w,Carbon,t[5] + growth[1]*w,Carbon,t[4] + growth[2]*w,Carbon,t[3] + growth[3]*w,Carbon,t[2] + growth[4]*,Carbon,pt[1] + growth[5]*w,Carbon,t[0]
 		schedule = RemovalSchedules[tree]
 		max_growth_year = max(schedule.keys()) if schedule else 0
 
@@ -183,10 +183,10 @@ def run_SMDAMAGE_fit_W(scenario):
 		SMDAMAGE_fit_W += wpt[('Carbon', float(u))] >= wpt[('Carbon', float(u + 1))], "W_carbon_consistency(" + str(u) + ")"
 
 	# Write a debug model. Easy to open with Notepad or LP_SolveIDE.
-	# SMDAMAGE_fit_W.writeLP(defaults_and_utilities.getOutputDirectory() + "Calibrate W " + defaults_and_utilities.getExperimentTag() + ".lpt")
+	SMDAMAGE_fit_W.writeLP(defaults_and_utilities.getOutputDirectory() + "Calibrate W " + defaults_and_utilities.getExperimentTag(scenario) + ".lpt")
 
 	solve_status = LpStatus[SMDAMAGE_fit_W.solve(PULP_CBC_CMD(msg=0))]
-	print (f"SMDAMAGE_Fit_W done. Solve status: {solve_status}, total error = {value(SMDAMAGE_fit_W.objective)}. Initial temperature = {value(initial_Temp.varValue)}")
+	print (f"SMDAMAGE_Fit_W done. Solve status: {solve_status}, total error = {value(SMDAMAGE_fit_W.objective)}. Calibrated initial temperature = {value(initial_Temp.varValue)}")
 
 	plotting_utils.plot_W_Hector_and_fitted(scenario, "Carbon", [Wpt_dict[('Carbon', float(t))] for t in range(defaults_and_utilities.getPulseDataLength())], [wpt[('Carbon', float(t))].varValue for t in range(defaults_and_utilities.getPulseDataLength())], defaults_and_utilities.getPulseDataLength, defaults_and_utilities.getOutputDirectory, defaults_and_utilities.experimentTag_to_file_name)
 	if scenario.is_removal_luc: plotting_utils.plot_W_Hector_and_fitted(scenario, "luc", [Wpt_dict[('luc', float(t))] for t in range(defaults_and_utilities.getPulseDataLength())], [wpt[('luc', float(t))].varValue for t in range(defaults_and_utilities.getPulseDataLength())], defaults_and_utilities.getPulseDataLength, defaults_and_utilities.getOutputDirectory, defaults_and_utilities.experimentTag_to_file_name)
@@ -196,6 +196,7 @@ def run_SMDAMAGE_fit_W(scenario):
 	for p in Variable_w_activities:
 		for t in range(defaults_and_utilities.getPulseDataLength()): Wpt_dict[(p,float(t))] = wpt[(p, float(t))].varValue
 	database_interface.save_fitted_wpt(db_path, Vpt_scenario_id, Wpt_dict)
+	database_interface.save_calibrated_initial_temp(db_path, Vpt_scenario_id, initial_Temp.varValue)
 	return initial_Temp.varValue
 
 

@@ -223,6 +223,30 @@ def get_scenario_discount_rate(db_path, scenario_id):
 	conn.close()
 	return row[0] if row else None
 
+def save_calibrated_initial_temp(db_path, scenario_id, calibrated_initial_temp):
+	"""Store the calibrated initial temperature on the source scenario row."""
+	conn = sqlite3.connect(db_path)
+	conn.execute("UPDATE scenarios SET calibrated_initial_temp = ? WHERE id = ?", (calibrated_initial_temp, scenario_id))
+	conn.commit()
+	conn.close()
+
+def get_calibrated_initial_temp(scenario):
+	"""Return calibrated_initial_temp from the most recently saved scenario matching the given scenario tag.
+	Always queries the uncalibrated (Wpt default) row, where save_calibrated_initial_temp stores the value."""
+	import defaults_and_utilities # Late import to avoid circular dependency.
+	db_path = defaults_and_utilities.getSolutionsDBPath()
+	was_updated = scenario.use_updated_Wpt
+	scenario.use_updated_Wpt = False
+	name = defaults_and_utilities.getExperimentTag(scenario)
+	scenario.use_updated_Wpt = was_updated
+	conn = sqlite3.connect(db_path)
+	cursor = conn.cursor()
+	cursor.execute("SELECT calibrated_initial_temp FROM scenarios WHERE name = ? ORDER BY id DESC LIMIT 1", (name,))
+	row = cursor.fetchone()
+	conn.close()
+	if row is None or row[0] is None: raise ValueError(f"No calibrated_initial_temp found for '{name}'. Run run_SMDAMAGE_fit_W first.")
+	return row[0]
+
 def get_scenario_tau(db_path, scenario_id):
 	"""Return tau for the scenario id, or None if not found."""
 	conn = sqlite3.connect(db_path)
