@@ -257,7 +257,7 @@ def load_forestry_from_busch_sqlite():
 				bidder_name = bidder_name_for(years, cluster_id)
 				description = f"Forestry clustered bidder r{years} c{cluster_id}"
 				insert_bidders.append((bidder_name, 'Remover', 'mhectares', int(years), 'ffi_emissions', description))
-				insert_bidder_metadata.append((bidder_name, int(years), int(cluster_id), float(area_ha_sum) / 1_000_000.0))
+				insert_bidder_metadata.append((bidder_name, int(years), int(cluster_id), float(area_ha_sum) / 1_000_000.0)) # Units conversion from hectares to millions of hectares.
 
 		target_cur.executemany("INSERT INTO bidders (bidder, class, units, contract_years, hector_name, description) VALUES (?, ?, ?, ?, ?, ?)", insert_bidders)
 		target_cur.executemany("INSERT INTO forestry_bidder_metadata (bidder, rotation_year, cluster_index, available_area_mhectares) VALUES (?, ?, ?, ?)", insert_bidder_metadata)
@@ -269,9 +269,7 @@ def load_forestry_from_busch_sqlite():
 		insert_bids = []
 		for years in contract_years_list:
 			curve_table = f"cluster_forestry_bid_curves_{years}"
-			curve_rows = source_cur.execute(
-				f'SELECT cluster_id, discount_rate_00, bid_step, npv_max_per_ha, step_area_ha FROM {curve_table} ORDER BY cluster_id, discount_rate_00, bid_step'
-			).fetchall()
+			curve_rows = source_cur.execute(f'SELECT cluster_id, discount_rate_00, bid_step, npv_max_per_ha, step_area_ha FROM {curve_table} ORDER BY cluster_id, discount_rate_00, bid_step').fetchall()
 			for cluster_id, discount_rate_00, bid_step, npv_max_per_ha, step_area_ha in curve_rows:
 				bidder_name = bidder_name_for(years, cluster_id)
 				price_per_unit = -float(npv_max_per_ha) # SMDAMAGE remover bids are costs (negative values).
