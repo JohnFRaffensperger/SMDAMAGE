@@ -189,3 +189,16 @@ def get_tree_schedule_carbon_removal(vpt): # vpt is {(bidder, year): value} with
 						t = u + float(growth_year)
 						if t in mtC_removed: mtC_removed[t] += vpt_val * tc
 	return mtC_removed
+
+def get_land_rent(scenario_id):
+	"""Return total_area * sum_t(pi(Forestry_Land_t)) for the given scenario.
+	This is the rent earned by forestry bidders from the land constraint —
+	a term missing from the Vpt-dual-based netrevenue calculation."""
+	forestry_meta = database_interface.get_forestry_metadata()
+	total_area = sum(meta['available_area_mhectares'] for meta in forestry_meta.values())
+	conn = sqlite3.connect(getSolutionsDBPath())
+	cursor = conn.cursor()
+	cursor.execute("SELECT COALESCE(SUM(pi), 0.0) FROM constraint_duals WHERE scenario_id = ? AND constraint_name LIKE 'Forestry_Land_%'", (scenario_id,))
+	sum_pi = cursor.fetchone()[0]
+	conn.close()
+	return total_area * sum_pi
