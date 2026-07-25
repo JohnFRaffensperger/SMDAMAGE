@@ -54,7 +54,7 @@ def plot_temps_Hector_and_fitted(scenario, Hector_temp, fit_temp, years, getOutp
 	# mplot.show()
 
 # Figure 1 in the paper. TODO: need to pass the scenarios better.
-def Uncalibrated_and_calibrated_temperature_trajectories(db_path, output_directory, scenario_id_uncalibrated=35, scenario_id_calibrated=36, scenario_id_hector=36):
+def Uncalibrated_and_calibrated_temperature_trajectories(db_path, output_directory, scenario_id_uncalibrated, scenario_id_calibrated, scenario_id_hector):
 	"""Plot uncalibrated and calibrated SMDAMAGE trajectories with calibrated Hector trajectory."""
 	font_size = 7
 	mplot.clf()
@@ -78,7 +78,7 @@ def Uncalibrated_and_calibrated_temperature_trajectories(db_path, output_directo
 	ax.set_ylabel("°C above base zero", rotation=0, ha="right", va="center", fontsize=font_size)
 	ax.tick_params(axis='both', which='major', labelsize=font_size)
 
-	ax.yaxis.set_label_coords(0.15, 0.6)
+	ax.yaxis.set_label_coords(0.15, 0.45)
 	ax.yaxis.set_major_locator(mticker.MultipleLocator(0.5)) # Grid lines every 0.5 °C.
 
 	ax.xaxis.set_label_coords(0.65, 0.05) # Label % of graph, from bottom left.
@@ -88,7 +88,7 @@ def Uncalibrated_and_calibrated_temperature_trajectories(db_path, output_directo
 	mplot.legend(frameon=False, fontsize=font_size)
 	mplot.savefig(output_directory + "Temperature_trajectories_for_uncalibrated_and_calibrated_trajectories.svg", bbox_inches='tight', pad_inches=0)
 
-def Temperature_trajectories_with_4_discount_rates(db_path, output_directory, scenario_id_1=37, scenario_id_2=38, scenario_id_3=39, scenario_id_4=40):
+def Temperature_trajectories_with_4_discount_rates(db_path, output_directory, scenario_id_1, scenario_id_2, scenario_id_3, scenario_id_4):
 	"""Plot calibrated SMDAMAGE temperature trajectories for four discount-rate scenarios."""
 	font_size = 7
 	mplot.clf()
@@ -112,10 +112,10 @@ def Temperature_trajectories_with_4_discount_rates(db_path, output_directory, sc
 	plot_data = [(rate37, years37, [series37[year]/1000.0 for year in years37]), (rate38, years38, [series38[year]/1000.0 for year in years38]), (rate39, years39, [series39[year]/1000.0 for year in years39]), (rate40, years40, [series40[year]/1000.0 for year in years40]),]
 
 	for rate, years, values in sorted(plot_data, key=lambda x: x[0]):
-		if abs(rate - 0.06) < 1e-12: mplot.plot(years, values, color='black', linestyle=(0, (8, 4)), linewidth=1.6, label='6%')
-		elif abs(rate - 0.03) < 1e-12: mplot.plot(years, values, color='black', linestyle=(0, (3, 2)), linewidth=1.3, label='3%')
-		elif abs(rate - 0.015) < 1e-12: mplot.plot(years, values, color='black', linestyle=':', linewidth=1.3, label='1.5%')
-		elif abs(rate - 0.0) < 1e-12: mplot.plot(years, values, color='black', linestyle='-', linewidth=1.3, label='0%')
+		if abs(rate - 0.06) < 1e-12: mplot.plot(years, values, color='black', linestyle=(0, (6, 3)), linewidth=1.2, label='6%')
+		elif abs(rate - 0.03) < 1e-12: mplot.plot(years, values, color='black', linestyle=(0, (3, 2)), linewidth=1.2, label='3%')
+		elif abs(rate - 0.015) < 1e-12: mplot.plot(years, values, color='black', linestyle=':', linewidth=1.2, label='1.5%')
+		elif abs(rate - 0.0) < 1e-12: mplot.plot(years, values, color='black', linestyle='-', linewidth=1.2, label='0%')
 		else: mplot.plot(years, values, color='black', linestyle='-', linewidth=1.3, label=str(100.0*rate) + '%')
 
 	mplot.xlabel('Years', fontsize=font_size)
@@ -134,7 +134,7 @@ def Temperature_trajectories_with_4_discount_rates(db_path, output_directory, sc
 	mplot.legend(frameon=False, fontsize=font_size)
 	mplot.savefig(output_directory + "Temperature_trajectories_with_4_discount_rates.svg", bbox_inches='tight', pad_inches=0)
 
-def Carbon_emissions_with_4_surcharge_rates(db_path, output_directory, scenario_id_1=41, scenario_id_2=42, scenario_id_3=43, scenario_id_4=44):
+def Carbon_emissions_with_4_tau_rates(db_path, output_directory, scenario_id_1, scenario_id_2, scenario_id_3, scenario_id_4):
 	"""Plot calibrated carbon emissions trajectories for four surcharge-rate scenarios."""
 	font_size = 7
 	mplot.clf()
@@ -175,9 +175,9 @@ def Carbon_emissions_with_4_surcharge_rates(db_path, output_directory, scenario_
 
 	ax.grid(True, which='major')
 	mplot.legend(frameon=False, fontsize=font_size)
-	mplot.savefig(output_directory + "Carbon_emissions_with_4_surcharge_rates.svg", bbox_inches='tight', pad_inches=0)
+	mplot.savefig(output_directory + "Carbon_emissions_with_4_tau_rates.svg", bbox_inches='tight', pad_inches=0)
 
-def Discounted_net_revenue_with_4_surcharge_rates(db_path, output_directory, scenario_id_1=41, scenario_id_2=42, scenario_id_3=43, scenario_id_4=44):
+def Discounted_net_revenue_with_4_tau_rates(db_path, output_directory, scenario_id_1, scenario_id_2, scenario_id_3, scenario_id_4):
 	"""Plot calibrated yearly revenue trajectories for four surcharge-rate scenarios."""
 	font_size = 7
 	mplot.clf()
@@ -217,9 +217,9 @@ def Discounted_net_revenue_with_4_surcharge_rates(db_path, output_directory, sce
 
 	ax.grid(True, which='major')
 	mplot.legend(frameon=False, fontsize=font_size)
-	mplot.savefig(output_directory + "Discounted_net_revenue_with_4_surcharge_rates.svg", bbox_inches='tight', pad_inches=0)
+	mplot.savefig(output_directory + "Discounted_net_revenue_with_4_tau_rates.svg", bbox_inches='tight', pad_inches=0)
 
-def Temperature_trajectories_with_4_surcharge_rates(db_path, output_directory, scenario_id_1=41, scenario_id_2=42, scenario_id_3=43, scenario_id_4=44):
+def Temperature_trajectories_with_4_tau_rates(db_path, output_directory, scenario_id_1, scenario_id_2, scenario_id_3, scenario_id_4):
 	"""Plot calibrated SMDAMAGE temperature trajectories for four surcharge-rate scenarios."""
 	font_size = 7
 	mplot.clf()
@@ -260,9 +260,9 @@ def Temperature_trajectories_with_4_surcharge_rates(db_path, output_directory, s
 
 	ax.grid(True, which='major')
 	mplot.legend(frameon=False, fontsize=font_size)
-	mplot.savefig(output_directory + "Temperature_trajectories_with_4_surcharge_rates.svg", bbox_inches='tight', pad_inches=0)
+	mplot.savefig(output_directory + "Temperature_trajectories_with_4_tau_rates.svg", bbox_inches='tight', pad_inches=0)
 
-def Price_trajectory_with_full_commitment_tau_1_6(db_path, output_directory, scenario_id=45):
+def Price_trajectory_with_full_commitment (db_path, output_directory, scenario_id):
 	"""Plot Carbon Vpt dual-price trajectories for full-commitment surcharge scenarios."""
 	font_size = 7
 	mplot.clf()
@@ -274,29 +274,31 @@ def Price_trajectory_with_full_commitment_tau_1_6(db_path, output_directory, sce
 
 	# Converting $/ton carbon to $/ton carbon dioxide.
 	mplot.plot(years, [-series[year] * 44/12 for year in years], color='black', linestyle='-', linewidth=1.3)
-
-	mplot.xlabel('Years', fontsize=font_size)
-	mplot.xlim(2025, 2275)
 	ax = mplot.gca()
-	ax.set_ylabel("$/ton CO\u2082", rotation=0, ha="right", va="center", fontsize=font_size)
 	ax.tick_params(axis='both', which='major', labelsize=font_size)
+	ax.grid(True, which='major')
 
-	ax.yaxis.set_label_coords(0.15, 0.6)
-	ax.xaxis.set_label_coords(0.65, 0.05) # Label % of graph, from bottom left.
+	mplot.xlabel('Year', fontsize=font_size)
+	mplot.xlim(2025, 2275)
+	ax.xaxis.set_label_coords(0.45, 0.05) # Label % of graph, from bottom left.
 	ax.xaxis.set_major_locator(mticker.MultipleLocator(25)) # Grid lines every 25 years.
 
-	ax.grid(True, which='major')
-	mplot.savefig(output_directory + "Price_trajectory_with_full_commitment_tau_1.6.svg", bbox_inches='tight', pad_inches=0)
+	ax.set_ylabel("$/ton emitted CO\u2082", rotation=0, ha="right", va="center", fontsize=font_size)
+	ax.yaxis.set_label_coords(0.2, 0.55)
 
-def Summary_of_estimates_to_end_global_warming(db_path, output_directory=None):
+	mplot.savefig(output_directory + "Price_trajectory_with_full_commitment_tau.svg", bbox_inches='tight', pad_inches=0)
+
+def Summary_of_estimates_to_end_global_warming(db_path, scenario_id_1, scenario_id_2, scenario_id_3, scenario_id_4, scenario_id_5, output_directory=None):
 	"""Summarize the current solution set for the five estimate scenarios.
-
 	The summary matches the table in Work in progress, SMDAMAGE.txt.
+	scenario_id_1..5 correspond to columns: Estimates 3, 1, 4, 2, 5.
 	"""
 	begin_year = 2025.0
 	end_year = 2125.0
 
-	columns = [("Estimate 3", 46, "ST, weak contracts"), ("Estimate 1", 39, "LT"), ("Estimate 4", 50, "ST, short auctions"), ("Estimate 2", 45, "ST"), ("Estimate 5", 51, "ST, time-varying τ"), ]
+	# Order presented in the paper.
+	columns = [("Estimate 3", "ST, weak contracts"), ("Estimate 1", "LT"), ("Estimate 4", "ST, short auctions"), ("Estimate 2", "ST"), ("Estimate 5", "ST, time-varying τ"),]
+	scenario_ids = [scenario_id_1, scenario_id_2, scenario_id_3, scenario_id_4, scenario_id_5]
 
 	def _trim_number(value, decimals=2):
 		text = f"{value:.{decimals}f}"
@@ -316,18 +318,18 @@ def Summary_of_estimates_to_end_global_warming(db_path, output_directory=None):
 	emissions_2025_2125 = []
 	removal_cost_2025_2125 = []
 
-	for _, scenario_id, _ in columns:
-		total_revenue = _load_scalar(cursor, "SELECT total_revenue FROM scenarios WHERE id = ?", (scenario_id,))
-		third_party_pays.append(total_revenue / 1_000_000.0) # Convert millions to trillions.
+	for _, scenario_id in zip(columns, scenario_ids):
+		net_revenue = _load_scalar(cursor, "SELECT net_revenue FROM scenarios WHERE id = ?", (scenario_id,))
+		third_party_pays.append(net_revenue / 1_000_000.0) # Convert millions to trillions.
 
 		avg_emitter_price = _load_scalar(cursor, "SELECT AVG(dual_price) FROM scenario_bidder_year WHERE scenario_id = ? AND bidder = ? AND year >= ? AND year <= ?", (scenario_id, "Carbon", begin_year, end_year),)
-		average_emitter_price.append((avg_emitter_price, avg_emitter_price * 44.0 / 12.0))
+		average_emitter_price.append((avg_emitter_price, avg_emitter_price * 44.0 / 12.0)) # Convert $/C to $/CO2.
 
 		avg_remover_price = _load_scalar(cursor, "SELECT AVG(dual_price) FROM scenario_bidder_year WHERE scenario_id = ? AND bidder = ? AND year >= ? AND year <= ?", (scenario_id, "Agriculture", begin_year, end_year), )
-		average_remover_price.append((avg_remover_price, avg_remover_price * 44.0 / 12.0))
+		average_remover_price.append((avg_remover_price, avg_remover_price * 44.0 / 12.0)) # Convert $/C to $/CO2.
 
 		emissions = _load_scalar(cursor, "SELECT SUM(quantity_value) FROM scenario_bidder_year WHERE scenario_id = ? AND bidder = ? AND year >= ? AND year <= ?", (scenario_id, "Carbon", begin_year, end_year), )
-		emissions_2025_2125.append(emissions / 1000.0)
+		emissions_2025_2125.append(emissions / 1000.0)  # Convert mtC to gtC.
 
 		removers = defaults_and_utilities.getRemovers()
 		removal_cost = 0.0
@@ -339,8 +341,8 @@ def Summary_of_estimates_to_end_global_warming(db_path, output_directory=None):
 	conn.close()
 
 	lines = []
-	lines.append("\t".join([estimate_label for estimate_label, _, _ in columns]))
-	lines.append("\t".join(["Model"] + [model_label for _, _, model_label in columns]))
+	lines.append("\t".join([estimate_label for estimate_label, _ in columns]))
+	lines.append("\t".join(["Model"] + [model_label for _, model_label in columns]))
 	lines.append("\t".join(["Third party pays"] + ["$" + _trim_number(value) + " trillion" for value in third_party_pays]))
 	lines.append("\t".join(["Average emitter price"] + [f"${_trim_number(price_tC)} /tC (${_trim_number(price_tCO2)} /tCO2)".replace(" ", "") for price_tC, price_tCO2 in average_emitter_price]))
 	lines.append("\t".join(["Average remover price"] + [f"${_trim_number(price_tC)} /tC (${_trim_number(price_tCO2)} /tCO2)".replace(" ", "") for price_tC, price_tCO2 in average_remover_price]))

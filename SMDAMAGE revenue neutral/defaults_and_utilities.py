@@ -25,7 +25,7 @@ def ensure_solutions_db():
 	conn = sqlite3.connect(db_path)
 	cursor = conn.cursor()
 	cursor.executescript("""CREATE TABLE IF NOT EXISTS scenarios (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, discount_rate REAL, initial_temp REAL, tau REAL,
-			is_revenue_neutral INTEGER, is_removal_luc INTEGER, use_updated_Wpt INTEGER, solver_status TEXT, total_revenue REAL, objective_value REAL, solution_datetime TEXT);
+			is_revenue_neutral INTEGER, is_removal_luc INTEGER, use_updated_Wpt INTEGER, solver_status TEXT, net_revenue REAL, objective_value REAL, solution_datetime TEXT);
 		CREATE TABLE IF NOT EXISTS variables (id INTEGER PRIMARY KEY AUTOINCREMENT, scenario_id INTEGER, bidder TEXT, year REAL, bid_step INTEGER, value REAL,
 			FOREIGN KEY (scenario_id) REFERENCES scenarios(id));
 		CREATE TABLE IF NOT EXISTS constraint_duals (id INTEGER PRIMARY KEY AUTOINCREMENT, scenario_id INTEGER, constraint_name TEXT, pi REAL, FOREIGN KEY (scenario_id) REFERENCES scenarios(id));

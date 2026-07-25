@@ -183,7 +183,7 @@ def run_SMDAMAGE_fit_W(scenario):
 		SMDAMAGE_fit_W += wpt[('Carbon', float(u))] >= wpt[('Carbon', float(u + 1))], "W_carbon_consistency(" + str(u) + ")"
 
 	# Write a debug model. Easy to open with Notepad or LP_SolveIDE.
-	SMDAMAGE_fit_W.writeLP(defaults_and_utilities.getOutputDirectory() + "Calibrate W " + defaults_and_utilities.getExperimentTag(scenario) + ".lpt")
+	# SMDAMAGE_fit_W.writeLP(defaults_and_utilities.getOutputDirectory() + "Calibrate W " + defaults_and_utilities.getExperimentTag(scenario) + ".lpt")
 
 	solve_status = LpStatus[SMDAMAGE_fit_W.solve(PULP_CBC_CMD(msg=0))]
 	print (f"SMDAMAGE_Fit_W done. Solve status: {solve_status}, total error = {value(SMDAMAGE_fit_W.objective)}. Calibrated initial temperature = {value(initial_Temp.varValue)}")
