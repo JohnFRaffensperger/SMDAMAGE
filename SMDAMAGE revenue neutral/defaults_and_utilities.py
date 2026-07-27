@@ -56,6 +56,11 @@ def ensure_solutions_db():
 		CREATE INDEX IF NOT EXISTS idx_scenario_series_name ON scenario_series(scenario_id, series_name);""")
 	try: cursor.execute("ALTER TABLE scenarios ADD COLUMN calibrated_initial_temp REAL")
 	except Exception: pass # Column already exists.
+	try: cursor.execute("ALTER TABLE scenarios ADD COLUMN land_rent REAL")
+	except Exception: pass # Column already exists.
+	forestry_meta_mig = database_interface.get_forestry_contractdata()
+	total_area_mig = sum(meta['available_area_mhectares'] for meta in forestry_meta_mig.values())
+	cursor.execute("UPDATE scenarios SET land_rent = (SELECT ? * COALESCE(SUM(cd.pi), 0.0) FROM constraint_duals cd WHERE cd.scenario_id = scenarios.id AND cd.constraint_name LIKE 'Forestry_Land_%') WHERE land_rent IS NULL", (total_area_mig,))
 	conn.commit()
 	conn.close()
 
@@ -194,7 +199,7 @@ def get_land_rent(scenario_id):
 	"""Return total_area * sum_t(pi(Forestry_Land_t)) for the given scenario.
 	This is the rent earned by forestry bidders from the land constraint —
 	a term missing from the Vpt-dual-based netrevenue calculation."""
-	forestry_meta = database_interface.get_forestry_metadata()
+	forestry_meta = database_interface.get_forestry_contractdata()
 	total_area = sum(meta['available_area_mhectares'] for meta in forestry_meta.values())
 	conn = sqlite3.connect(getSolutionsDBPath())
 	cursor = conn.cursor()

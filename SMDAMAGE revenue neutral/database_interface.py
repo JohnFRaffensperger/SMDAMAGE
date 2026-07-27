@@ -61,7 +61,7 @@ def get_all_bids(discount_rate=None):
 	for bidder, price, qty in rows: result.setdefault(bidder, []).append((price, qty))
 	return result
 
-def get_forestry_metadata():
+def get_forestry_contractdata():
 	"""Retrieve metadata for all forestry bidders."""
 	rows = do_query("SELECT bidder, rotation_year, cluster_index, available_area_mhectares FROM forestry_bidder_metadata")
 	columns = ["bidder", "rotation_year", "cluster_index", "available_area_mhectares"]

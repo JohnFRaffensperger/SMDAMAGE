@@ -27,7 +27,7 @@ def init_db():
     if os.path.exists(SOLUTIONS_DB): os.remove(SOLUTIONS_DB)
     conn = sqlite3.connect(SOLUTIONS_DB)
     c = conn.cursor()
-    c.execute("""CREATE TABLE scenarios (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, discount_rate REAL, initial_temp REAL, tau REAL, is_revenue_neutral INTEGER, is_removal_luc INTEGER, use_updated_Wpt INTEGER, solver_status TEXT, net_revenue REAL, objective_value REAL, solution_datetime TEXT)""")
+    c.execute("""CREATE TABLE scenarios (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, discount_rate REAL, initial_temp REAL, tau REAL, is_revenue_neutral INTEGER, is_removal_luc INTEGER, use_updated_Wpt INTEGER, solver_status TEXT, net_revenue REAL, land_rent REAL, objective_value REAL, solution_datetime TEXT)""")
     c.execute("""CREATE TABLE variables (scenario_id INTEGER NOT NULL, bidder TEXT NOT NULL, year REAL NOT NULL, bid_step INTEGER NOT NULL, value REAL NOT NULL, PRIMARY KEY (scenario_id, bidder, year, bid_step), FOREIGN KEY (scenario_id) REFERENCES scenarios(id)) WITHOUT ROWID""")
     c.execute("CREATE INDEX idx_var_frontier ON variables(scenario_id, bidder, year)")
     c.execute("""CREATE TABLE constraint_duals (scenario_id INTEGER NOT NULL, constraint_name TEXT NOT NULL, pi REAL NOT NULL, PRIMARY KEY (scenario_id, constraint_name), FOREIGN KEY (scenario_id) REFERENCES scenarios(id)) WITHOUT ROWID""")
@@ -107,10 +107,10 @@ def reload_solutions():
 
             df = pd.read_csv(path, skiprows=1, header=0, low_memory=False)
 
-            c.execute("""INSERT INTO scenarios (name, discount_rate, initial_temp, tau, is_revenue_neutral, is_removal_luc, use_updated_Wpt, solver_status, net_revenue, objective_value, solution_datetime) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            c.execute("""INSERT INTO scenarios (name, discount_rate, initial_temp, tau, is_revenue_neutral, is_removal_luc, use_updated_Wpt, solver_status, net_revenue, land_rent, objective_value, solution_datetime) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (params['name'], params['discount_rate'], params['initial_temp'],
                  params['tau'], params['is_revenue_neutral'], params['is_removal_luc'],
-                 params['use_updated_Wpt'], status, total_revenue, None, "Reloaded"))
+                 params['use_updated_Wpt'], status, total_revenue, None, None, "Reloaded"))
             scenario_id = c.lastrowid
             qty_cols, dual_cols = classify_columns(df.columns)
 

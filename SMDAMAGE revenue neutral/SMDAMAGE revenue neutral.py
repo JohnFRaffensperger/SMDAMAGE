@@ -1,4 +1,8 @@
 # Simulation of SMDAMAGE, by John F Raffensperger. 10 Aug 2019, 10 Sep 2022, 17 May 2023, 3 Feb 2025, 17 Mar 2026, 21 Jul 2026.
+# SMDAMAGE_0 is the long-run revenue-negative model from my 2021 paper.
+# SMDAMAGE_1 is the long-run revenue-neutral model.
+# SMDAMAGE_2 is the short-run (e.g., 2-year auctions) revenue-neutral model.
+
 # Hector uses gigatons of carbon, so we need to convert Hector's gigatons warming effects to SMDAMAGE megatons decision variables and back again to Hector gigatons for validation.
 # Critical values: discount rate in discount_rate(), StartYear (e.g., 2025), BeginConstraintYear (warming deadline, e.g., 2125), revenue neutrality as REVENUE_NEUTRAL, and InitialTemperature.
 
@@ -22,8 +26,9 @@ import os
 import numpy as np
 import wpt_calibration # Wpt calibration functions
 
-SOLVE_RESTRICTED = True
+SOLVE_RESTRICTED = True # use the column generation algorithm for faster solutions.
 
+# Retrieve warming parameters from the database and collect them into the Wpt dictionary for all bidders.
 def get_warming_effects(scenario): # Get warming effects in degrees Celsius in each period, based on the solution vpt.
 	Pulse = database_interface.getPulse() # Reads the Pulse input file from database.
 	Emitters = defaults_and_utilities.getEmitters() # ['C2F6', 'CF4', 'CH4', 'Carbon', 'HFC125', 'HFC134a', 'HFC143a', 'N2O','SF6']
@@ -67,25 +72,17 @@ def get_warming_effects(scenario): # Get warming effects in degrees Celsius in e
 			length = pulse_len - year
 			if length > 0: tree_wpt_arr[year:] += tc * ag_wpt_arr[:length] * scaleCelsius / 1000.0
 		for t0 in range(pulse_len): Wpt_dict[(tree, float(t0))] = float(tree_wpt_arr[t0])
-	# Old convolution loop:
-	# for tree in ForestryBidders:
-	# 	removal_data = database_interface.get_forestry_carbon_removal(tree) # Returns list of (year, tc)
-	# 	for year, tc in removal_data:
-	# 		for coolingyear in range(year, defaults_and_utilities.getPulseDataLength()):
-	# 			# Forestry has same cooling effects as Agriculture, following either "luc" or "ffi" in Hector, convolved with tree growth.
-	# 			Wpt_dict[(tree, float(coolingyear))] += tc * Wpt_dict [('Agriculture', float(coolingyear - year))] * scaleCelsius / 1000.0
 
-	# 	CH4: MtCH4/yr, N2O: MtN2O-N/yr, C: MtC/yr, NMVOC: Mt/yr, BC: Mt/yr, OC: Mt/yr,
-	# 	CF4: kt/yr, C2F6: kt/yr, HFC125: kt/yr, HFC134a: kt/yr, HFC143a: kt/yr, CFC11: kt/yr, CFC12: kt/yr, HCF22: kt/yr]
+	# 	Units: C2F6: kt/yr, CF4: kt/yr, CH4: MtCH4/yr, HFC125: kt/yr, HFC134a: kt/yr, HFC143a: kt/yr, N2O: MtN2O-N/yr
 	for p in ['C2F6', 'CF4', 'CH4', 'HFC125', 'HFC134a', 'HFC143a', 'N2O', 'SF6']:
 		for t0 in range(defaults_and_utilities.getPulseDataLength()): Wpt_dict[(p, float(t0))] = Pulse[p][1 + t0]*scaleCelsius/Pulse[p][0]
 	return Wpt_dict
 
-def get_previous_acceptedbidsteps_bindingrows_and_prices(scenario_id=None):
+# Read the database for previous solutions to jumpstart the next model.
+def get_previous_acceptedbidsteps (scenario_id=None):
 	"""
 	Returns accepted bid steps for each (bidder, year), the set of binding land constraint names,
-	and vpt dual prices keyed by (bidder, year).
-	If scenario_id is given, restricts to that single scenario.
+	and vpt dual prices keyed by (bidder, year). If scenario_id is given, restricts to that single scenario.
 	"""
 	defaults_and_utilities.ensure_solutions_db()
 	db_path = defaults_and_utilities.getSolutionsDBPath()
@@ -111,6 +108,7 @@ def get_previous_acceptedbidsteps_bindingrows_and_prices(scenario_id=None):
 	conn.close()
 	return previous_acceptedbidsteps, binding_constraints, vpt_duals
 
+# Read all current bids from the database.
 def read_bids(scenario):
 	AllBidPeriods = defaults_and_utilities.getBidPeriods()
 	StartYear = defaults_and_utilities.getStartYear()
@@ -145,10 +143,10 @@ def read_bids(scenario):
 
 def Solve_SMDAMAGE(scenario, APT_set, PT_set, Bapt, Uapt, Wpt_dict, BidStepSet, Pollutants, tau_override=None, tau_mode="standard", restrict_columns=True):
 	"""
-	Solves the SMDAMAGE linear program using a restricted set of columns and rows.
-	Implements a simplified column and row generation algorithm.
-	tau_mode: "standard" uses BeginConstraintYear logic, "dynamic" uses tau_override as dict by period.
-	restrict_columns: if False, all (a,p,t) columns are active (no warm-starting from DB).
+	If not scenario.is_revenue_neutral, this function solves SMDAMAGE_0, else this function solves SMDAMAGE_1.
+	The function runs a simplified column generation algorithm, starting with a restricted set of columns if available in the database.
+	tau_mode: if "standard", then tau is a scalar used for all years; elsif "dynamic", tau[t] can be a different value for every period.
+	restrict_columns: if False, all (a,p,t) columns are active (no warm-starting from DB). With an empty solutions database, you're stuck with a big first solve.
 	"""
 	# 1. Get general parameters.
 	restrict_columns = SOLVE_RESTRICTED
@@ -162,7 +160,7 @@ def Solve_SMDAMAGE(scenario, APT_set, PT_set, Bapt, Uapt, Wpt_dict, BidStepSet, 
 	# 2. Fetch bidder metadata to determine direction (Emitter/Remover)
 	# use_scenario_id = 6 # If you want to start from a specific scenario for speed. Otherwise, the code loads nonzero columns from all previous solutions.
 	# previous_acceptedbids, previous_bindingrows, _ = get_previous_acceptedbidsteps_bindingrows_and_prices (scenario_id = use_scenario_id)
-	previous_acceptedbids, _, _ = get_previous_acceptedbidsteps_bindingrows_and_prices ()
+	previous_acceptedbids, _, _ = get_previous_acceptedbidsteps ()
 	bidder_metadata = {b['bidder_name']: b for b in database_interface.get_bidders()}
 	# If smdamage_solutions.db is empty, run the first model with all variables. It'll be slow, but later models will run much faster.
 	if not previous_acceptedbids: print ("The solutions database smdamage_solutions.db is empty, so the first model run will be slow. Later models should solve much faster.")
@@ -180,10 +178,11 @@ def Solve_SMDAMAGE(scenario, APT_set, PT_set, Bapt, Uapt, Wpt_dict, BidStepSet, 
 	temperatureChange = {t: LpVariable(f"tempChange({t})", None, None) for t in ModelPeriods}
 	if scenario.is_revenue_neutral: taxedTemperatureChange = {t: LpVariable(f"taxedTempChange({t})", None, None) for t in ModelPeriods}
 	sparse_Wpt = {k: v for k, v in Wpt_dict.items() if v != 0.0}
-	forestry_meta = database_interface.get_forestry_metadata()
-	total_area = sum(meta['available_area_mhectares'] for meta in forestry_meta.values())
-	basis_file = os.path.abspath(os.path.join(defaults_and_utilities.getOutputDirectory(), "smdamage_warm.bas"))
-	if os.path.exists(basis_file): os.remove(basis_file) # Don't bleed basis across scenarios.
+
+	# Total area, used below in 3.2 land constraint.
+	forestry_contract_data = database_interface.get_forestry_contractdata()
+	total_area = sum(meta['available_area_mhectares'] for meta in forestry_contract_data.values())
+
 	temp_exprs = {t: lpSum(sparse_Wpt[(p, float(t - u))] * vpt[p, u] for (p, u) in PT_set if u <= t and (p, float(t - u)) in sparse_Wpt) - temperatureChange[t] for t in ModelPeriods}
 	if scenario.is_revenue_neutral:
 		if tau_mode == "dynamic" and isinstance(local_tau, dict): # tau is a time indexed dictionary.
@@ -206,7 +205,10 @@ def Solve_SMDAMAGE(scenario, APT_set, PT_set, Bapt, Uapt, Wpt_dict, BidStepSet, 
 		SMDAMAGE += defaults_and_utilities.inflate_2020_to_2025() * lpSum(Bapt[a, p, t] * qapt[a, p, t] for (a, p, t) in qapt), "Total_value"
 
 		# 3.2. Forestry land constraint: one per bid period, summed over all bidders (always all rows).
-		for t in bid_periods: SMDAMAGE += lpSum(vpt[bidder_name, u] for bidder_name, meta in forestry_meta.items() for u in bid_periods if (bidder_name, u) in vpt and u <= t <= u + meta['rotation_year'] - 1) <= total_area, f"Forestry_Land_{t}"
+		for t in bid_periods: SMDAMAGE += lpSum(vpt[bidder_name, u]
+						for bidder_name, bidder_contract in forestry_contract_data.items()
+						for u in bid_periods if (bidder_name, u) in vpt and u <= t <= u + bidder_contract['rotation_year'] - 1) \
+							<= total_area, f"Forestry_Land_{t}"
 
 		# 3.3. Vpt rows
 		Vname = {}
@@ -229,10 +231,7 @@ def Solve_SMDAMAGE(scenario, APT_set, PT_set, Bapt, Uapt, Wpt_dict, BidStepSet, 
 
 		# 4. Solve. Write a debugging model if you like.
 		# SMDAMAGE.writeLP(defaults_and_utilities.getOutputDirectory() + defaults_and_utilities.experimentTag_to_file_name(scenario) + ".lpt")
-		solve_opts = ['-threads', '8', '-basisOut', basis_file]
-		if iterations > 1 and os.path.exists(basis_file): solve_opts += ['-basisIn', basis_file]
-		solve_status = LpStatus[SMDAMAGE.solve(PULP_CBC_CMD(msg=0, options=solve_opts))]
-		if solve_status != "Optimal" and os.path.exists(basis_file): os.remove(basis_file)
+		solve_status = LpStatus[SMDAMAGE.solve(PULP_CBC_CMD(msg=0, options=['-threads', '8']))]
 		end_solve_time = time.time()
 		dual_pi = {(p, t): (SMDAMAGE.constraints[Vname[(p, t)]].pi or 0.0) for (p, t) in Vname} # item 4.
 
@@ -245,10 +244,6 @@ def Solve_SMDAMAGE(scenario, APT_set, PT_set, Bapt, Uapt, Wpt_dict, BidStepSet, 
 		for (a, p, t) in restricted_APT_set:
 			if a > current_front_max.get((p, t), -1): current_front_max[(p, t)] = a
 
-		# for p in set(p for p, t in PT_set):
-			# front_max_a = {t: current_front_max[(p, t)] for t in bid_periods if (p, t) in current_front_max}
-			# next_bid_step(p, scenario, front_max_a, {u: (SMDAMAGE.constraints[Vname[(p, u)]].pi if (p, u) in Vname else 0.0) for u in bid_periods}, all_bids[p], bidder_metadata.get(p, {}), bid_periods, inflate2020_to_2025, StartYear)
-
 		# 5.2. Decide whether to add the next bid steps.
 		for (p, t) in PT_set:
 			meta = bidder_metadata.get(p, {})
@@ -259,22 +254,20 @@ def Solve_SMDAMAGE(scenario, APT_set, PT_set, Bapt, Uapt, Wpt_dict, BidStepSet, 
 			discount = inflate2020_to_2025 * scenario.discount_rate(t - StartYear)
 			kt_divisor = 1000.0 if meta.get('units') == 'kt' else 1.0
 
-			# TODO: I think the reduced cost for forestry depends on the land constraint:
-			# 		For a forestry bid, if their (positive) objective coefficient + vpt.pi + zzz > 0.0.
 			# For an emitter, if their (positive) objective coefficient + vpt.pi > 0.0, their bid should enter. The emitter is willing to pay more than that for the right to emit. obj_emitter + pi >= 0.
 			# For a remover, if their (negative) objective coefficient + vpt.pi < 0.0, their bid should enter. The remover is willing to remove carbon for less than a stated price. pi - obj_remover >= 0.
 			for a in range(max_a + 1, len(bids_p)):
 				if (a, p, t) in restricted_APT_set: continue
 				next_coeff, _ = bids_p[a]
 				next_reduced_cost = next_coeff * discount / kt_divisor + dual
-				if next_reduced_cost > 0.0:
+				if next_reduced_cost > - 0.0001: # Take columns with near zero reduced cost to kill off degeneracy.
 					restricted_APT_set.add((a, p, t))
 					expanded = True
 					added_cols += 1
-				else: # Add the next two bids. Experiments show this to work well.
-					for extra_a in range(a, min(a + 2, len(bids_p))):
-						restricted_APT_set.add((extra_a, p, t))
-						added_cols += 1
+				else: # Bring the next two bids into the optimization. Just trying to be clever.
+					# for extra_a in range(a, min(a + 2, len(bids_p))):
+					# 	restricted_APT_set.add((extra_a, p, t))
+					# 	added_cols += 1
 					break
 
 		obj_val = value(SMDAMAGE.objective) if solve_status == "Optimal" else 0.0
@@ -285,6 +278,7 @@ def Solve_SMDAMAGE(scenario, APT_set, PT_set, Bapt, Uapt, Wpt_dict, BidStepSet, 
 			scenario.solution_datetime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 			return SMDAMAGE, qapt, vpt, temperatureChange, (taxedTemperatureChange if scenario.is_revenue_neutral else None), Vname, solve_status
 
+# We've solved the optimization, now store it in the database and wherever you want to put it.
 def save_solution_to_db(scenario, SMDAMAGE, vpt, qapt, Vname, temp_data=None, scenario_series_entries=None, bidder_year_rows=None, artifact_rows=None):
 	db_path = defaults_and_utilities.getSolutionsDBPath()
 	defaults_and_utilities.ensure_solutions_db()
@@ -294,35 +288,28 @@ def save_solution_to_db(scenario, SMDAMAGE, vpt, qapt, Vname, temp_data=None, sc
 
 	sol_datetime = getattr(scenario, 'solution_datetime', datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 	net_revenue = -sum(vpt[p, t].varValue * SMDAMAGE.constraints[Vname[(p, t)]].pi for (p, t) in Vname if Vname[(p, t)] in SMDAMAGE.constraints)
-	cursor.execute("INSERT INTO scenarios (name, discount_rate, initial_temp, tau, is_revenue_neutral, is_removal_luc, use_updated_Wpt, solver_status, net_revenue, objective_value, solution_datetime) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+	forestry_meta = database_interface.get_forestry_contractdata()
+	land_rent = sum(meta['available_area_mhectares'] for meta in forestry_meta.values()) * sum((c.pi or 0.0) for name, c in SMDAMAGE.constraints.items() if name.startswith('Forestry_Land_'))
+	cursor.execute("INSERT INTO scenarios (name, discount_rate, initial_temp, tau, is_revenue_neutral, is_removal_luc, use_updated_Wpt, solver_status, net_revenue, land_rent, objective_value, solution_datetime) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
 		(defaults_and_utilities.getExperimentTag(scenario), scenario.discount_rate_base, scenario.initial_temperature, scenario.tau, 1 if scenario.is_revenue_neutral else 0,
-		1 if "luc_removal" in defaults_and_utilities.getExperimentTag(scenario) else 0, 1 if scenario.use_updated_Wpt else 0, LpStatus[SMDAMAGE.status], net_revenue, value(SMDAMAGE.objective), sol_datetime))
+		1 if "luc_removal" in defaults_and_utilities.getExperimentTag(scenario) else 0, 1 if scenario.use_updated_Wpt else 0, LpStatus[SMDAMAGE.status], net_revenue, land_rent, value(SMDAMAGE.objective), sol_datetime))
 	scenario_id = cursor.lastrowid
 
 	# Save the nonzero solution.
 	variables = [(scenario_id, p, t, a, var.varValue) for (a, p, t), var in qapt.items() if var.varValue != 0.0]
-	if variables:
-		cursor.executemany(
-			"""INSERT INTO variables (scenario_id, bidder, year, bid_step, value) VALUES (?,?,?,?,?)
-			ON CONFLICT(scenario_id, bidder, year, bid_step) DO UPDATE SET value=excluded.value""", variables)
+	if variables: cursor.executemany("""INSERT INTO variables (scenario_id, bidder, year, bid_step, value) VALUES (?,?,?,?,?) ON CONFLICT(scenario_id, bidder, year, bid_step) DO UPDATE SET value=excluded.value""", variables)
 	duals = [(scenario_id, c_name, c.pi) for c_name, c in SMDAMAGE.constraints.items() if c.pi != 0.0]
-	if duals:
-		cursor.executemany(
-			"""INSERT INTO constraint_duals (scenario_id, constraint_name, pi) VALUES (?,?,?)
-			ON CONFLICT(scenario_id, constraint_name) DO UPDATE SET pi=excluded.pi""", duals)
+	if duals: cursor.executemany("""INSERT INTO constraint_duals (scenario_id, constraint_name, pi) VALUES (?,?,?) ON CONFLICT(scenario_id, constraint_name) DO UPDATE SET pi=excluded.pi""", duals)
 
 	if temp_data:
 		for source, year_to_value in temp_data.items():
-			cursor.executemany("""INSERT INTO temperature_series (scenario_id, source, year, value) VALUES (?,?,?,?)
-				ON CONFLICT(scenario_id, source, year) DO UPDATE SET value=excluded.value""", [(scenario_id, source, float(year), value) for year, value in year_to_value.items()])
-			cursor.executemany("""INSERT INTO scenario_series (scenario_id, series_name, year, value, units, series_source) VALUES (?,?,?,?,?,?)
-				ON CONFLICT(scenario_id, series_name, year) DO UPDATE SET value=excluded.value, units=excluded.units, series_source=excluded.series_source""",
+			cursor.executemany("""INSERT INTO temperature_series (scenario_id, source, year, value) VALUES (?,?,?,?) ON CONFLICT(scenario_id, source, year) DO UPDATE SET value=excluded.value""", [(scenario_id, source, float(year), value) for year, value in year_to_value.items()])
+			cursor.executemany("""INSERT INTO scenario_series (scenario_id, series_name, year, value, units, series_source) VALUES (?,?,?,?,?,?) ON CONFLICT(scenario_id, series_name, year) DO UPDATE SET value=excluded.value, units=excluded.units, series_source=excluded.series_source""",
 				[(scenario_id, source, float(year), value, None, "temperature_output_csv") for year, value in year_to_value.items()])
 
 	if scenario_series_entries:
 		for series_name, year_to_value, units, series_source in scenario_series_entries:
-			cursor.executemany("""INSERT INTO scenario_series (scenario_id, series_name, year, value, units, series_source) VALUES (?,?,?,?,?,?)
-				ON CONFLICT(scenario_id, series_name, year) DO UPDATE SET value=excluded.value, units=excluded.units, series_source=excluded.series_source""",
+			cursor.executemany("""INSERT INTO scenario_series (scenario_id, series_name, year, value, units, series_source) VALUES (?,?,?,?,?,?) ON CONFLICT(scenario_id, series_name, year) DO UPDATE SET value=excluded.value, units=excluded.units, series_source=excluded.series_source""",
 				[(scenario_id, series_name, float(year), value, units, series_source) for year, value in year_to_value.items()])
 
 	if bidder_year_rows:
@@ -338,9 +325,11 @@ def save_solution_to_db(scenario, SMDAMAGE, vpt, qapt, Vname, temp_data=None, sc
 	if defaults_and_utilities.write_legacy_files(): defaults_and_utilities.rebuild_temperature_output_csv_from_db()
 	return scenario_id
 
-def run_SMDAMAGE(scenario): # Main function. Solve the SMDAMAGE model to find the best schedule of emissions and carbon removal.
-	print ("\nSMDAMAGE. " + defaults_and_utilities.getExperimentTag(scenario) + ". " + time.asctime(time.localtime(time.time())) + ".")
+# Main function. With solve_SMDAMAGE above, solve the SMDAMAGE model to find the best schedule of emissions and carbon removal.
+def run_SMDAMAGE(scenario):
 	start_time = time.time()
+	if scenario.is_revenue_neutral: print ("\nSMDAMAGE_1. " + defaults_and_utilities.getExperimentTag(scenario) + ". " + time.asctime(time.localtime(time.time())) + ".")
+	else: print ("\nSMDAMAGE_0. " + defaults_and_utilities.getExperimentTag(scenario) + ". " + time.asctime(time.localtime(time.time())) + ".")
 
 	BeginConstraintYear = int(defaults_and_utilities.getFirstConstrainedYear())
 	ConstraintPeriods = [float(BeginConstraintYear) + float(t)/float(hector_interface.getPeriodsPerYear()) for t in range(hector_interface.getPeriodsPerYear()*(defaults_and_utilities.getPulseDataLength() + int(defaults_and_utilities.getStartYear()) - int(BeginConstraintYear)))]
@@ -356,7 +345,7 @@ def run_SMDAMAGE(scenario): # Main function. Solve the SMDAMAGE model to find th
 		TotalU[p,t] += Uapt[a,p,t]
 		BidStepSet[p,t].append(a)
 
-	# Emitters face tax tau. Others do not. Reminder, Carbon is 'ffi' in pulsefile.
+	# Only emitters face tax tau. Removers do not. Reminder, Carbon is 'ffi' in pulsefile.
 	Emitters = defaults_and_utilities.getEmitters() # ['C2F6', 'CF4', 'CH4', 'Carbon', 'HFC125', 'HFC134a', 'HFC143a', 'N2O', 'SF6']
 	local_tau = scenario.tau # We have to change tau when the temperature is low enough (at the end of this loop), but we don't want to change the output filename.
 
@@ -392,7 +381,8 @@ def run_SMDAMAGE(scenario): # Main function. Solve the SMDAMAGE model to find th
 					for p in Pollutants: line.append(str(vpt[p,t].varValue)) # qty units
 					for p in Pollutants: line.append(str(vpt[p,t].varValue/TotalU[p,t])) # Fraction of bid
 					for p in Pollutants: line.append(str(SMDAMAGE.constraints[Vname[(p,t)]].pi)) # $M/unit
-				else: for p in Pollutants: line.append(',,')
+				else:
+					for p in Pollutants: line.append(',,')
 
 				line.append(str(scenario.initial_temperature + temperatureChange[t].varValue))
 
@@ -413,33 +403,35 @@ def run_SMDAMAGE(scenario): # Main function. Solve the SMDAMAGE model to find th
 		scenario_series_entries.append((taxed_source, {t: scenario.initial_temperature + taxedTemperatureChange[t].varValue for t in defaults_and_utilities.getModelPeriods()}, "thousandths_C", "smdamage_soln_csv"))
 	scenario_series_entries.append(("Forestry carbon", defaults_and_utilities.get_tree_schedule_carbon_removal({k: v.varValue for k, v in vpt.items()}), "mtC", "smdamage_soln_csv"))
 	artifact_rows = [("smdamage_soln_csv", defaults_and_utilities.SMDAMAGE_output_file_name(scenario), defaults_and_utilities.getExperimentTag(scenario) + ". Solve status " + solve_status + ". Total revenue " + str(netrevenue), getattr(scenario, 'solution_datetime', datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")), None)]
-	# for t in defaults_and_utilities.getModelPeriods():
-	# 	if f"Forestry_Land_({t})" in SMDAMAGE.constraints: print(f""Forestry_Land_{t}"({t}).pi: {SMDAMAGE.constraints[f'"Forestry_Land_{t}"({t})'].pi}")
-	print (f"Solve status {solve_status}. Objective ${value(SMDAMAGE.objective) / 1000:.2f} billion. Net revenue {netrevenue}. Tau {local_tau}. 2125 temp " + str(round(scenario.initial_temperature + temperatureChange [2125].varValue,3)) + f" thousandths C. Total time {time.time() - start_time:.1f}s.")
+
 	scenario_id = save_solution_to_db(scenario, SMDAMAGE, vpt, qapt, Vname, temp_data, scenario_series_entries, bidder_year_rows, artifact_rows)
-	# print ("Done, %s, %.1f seconds." % (time.asctime(time.localtime(time.time())), float(time.time() - startTime)))
-	# print ("Reminder: convert $/ton C to $/ton CO2. Temp in 2125 is " + str(round(scenario.initial_temperature + temperatureChange [2125].varValue,3)) + " thousandths of a degree C.")
-	# print (getCarbonRemovedByForestry("Forestry carbon" + defaults_and_utilities.experimentTag_to_file_name(scenario)))
+	land_rent = defaults_and_utilities.get_land_rent(scenario_id)
+	print (f"Solve status {solve_status}. Objective ${value(SMDAMAGE.objective) / 1000:.2f} billion. Net revenue {netrevenue}. Land rent {land_rent:.2f}. Tau {local_tau}. 2125 temp " + str(round(scenario.initial_temperature + temperatureChange [2125].varValue,3)) + f" thousandths C. Total time {time.time() - start_time:.1f}s.")
 
 	return scenario_id
 # END run_SMDAMAGE().
 
+# Here's how the subgradient optimization works.
 def update_tau (old_temp, current_temp, old_tau, current_tau, step_size):
 	total_change = 0.0
 	new_tau = {t: 1.0 for t in old_tau}
 	for t in old_tau:
 		if t >= defaults_and_utilities.getFirstConstrainedYear():
 			# new_tau[t] = linear_interpolation(0.0, [old_temp[t], current_temp[t]], [old_tau[t], current_tau[t]])
+			# Keep in mind that tau[t] is the tax on the effect year, not the emission year. I doubt anyone will ever read this, but it's a big f'g deal.
+			# If the current_temp[t] == 0, keep tau as is. If current_temp[t] > 0, tau should rise. If current_temp[t] < 0, tau can fall.
 			new_tau[t] = max(1.0, current_tau[t] + step_size*current_temp[t]/1000.0)
 			total_change += abs(new_tau[t] - old_tau[t])
 	return total_change, new_tau
+# Examples:
 # old_tau = {2125: 1.5, 2126: 1.4, 2127: 2.0}
 # old_temp = {2125: 100.0, 2126: 120.0, 2127: -80.0}
 # current_tau = {2125: 1.7, 2126: 1.5, 2127: 1.8}
 # current_temp = {2125: -100.0, 2126: 12.0, 2127: 80.0}
 # print("\n\n", update_tau(old_temp, current_temp, old_tau, current_tau, 1.0))
 
-def run_SMDAMAGE_for_tau(scenario): # This version finds the optimal tau.
+# Use subgradient optimization on SMDAMAGE_1 to find the best tau by year.
+def run_SMDAMAGE_for_tau(scenario):
 	Wpt_dict = get_warming_effects(scenario) # Get warming effects in degrees Celsius in each period, based on the solution vpt.
 	Bapt, Uapt, APT_set, PT_set = read_bids(scenario)
 
@@ -466,14 +458,14 @@ def run_SMDAMAGE_for_tau(scenario): # This version finds the optimal tau.
 		assert (BeginConstraintYear <= defaults_and_utilities.getStartYear() + defaults_and_utilities.getNumber_of_bid_years())
 
 		# Initialize tau.
-		old_tau = {t: 1.0 for t in defaults_and_utilities.getModelPeriods()} # Net zero gets you only the current temperature.
+		old_tau = {t: 1.0 for t in defaults_and_utilities.getModelPeriods()} # When tau = 1, the market is net zero, which gets you only the current temperature into the future. But I want base zero.
 		old_temp = {t: scenario.initial_temperature for t in ConstraintPeriods}
 		current_tau = {t: scenario.tau if t in ConstraintPeriods else 1.0 for t in defaults_and_utilities.getModelPeriods()} # We have to change tau when the temperature is low enough (at the end of this loop), but we don't want to change the output filename.
 		current_temp = {t: 0.0 for t in ConstraintPeriods}
 
 		# Loop over tau[t] =================
 		step_size = 2.0 # For subgradient optimization.
-		for run in range(200):
+		for run in range(200): # At most 200 iterations, but see total_change stopping criteria below.
 			# Use the restricted solver
 			SMDAMAGE, qapt, vpt, temperatureChange, taxedTemperatureChange, Vname, solve_status = Solve_SMDAMAGE(scenario, APT_set, PT_set, Bapt, Uapt, Wpt_dict, BidStepSet, Pollutants,
 					tau_override=current_tau, tau_mode="dynamic")
@@ -484,8 +476,11 @@ def run_SMDAMAGE_for_tau(scenario): # This version finds the optimal tau.
 			# Subgradient optimization. Update temperature and tau for the next run.
 			total_change, next_tau = update_tau(old_temp, current_temp, old_tau, current_tau, step_size)
 			step_size = 0.9*step_size
+
+			 # Stopping criteria.
 			if total_change < 0.1: break
-			sum_of_under_shoot = 0.0
+
+			sum_of_under_shoot = 0.0 # error metric
 			for t in ConstraintPeriods:
 				sum_of_under_shoot += scenario.initial_temperature - temperatureChange[t].varValue
 				old_temp[t] = scenario.initial_temperature + taxedTemperatureChange[t].varValue
@@ -527,9 +522,11 @@ def run_SMDAMAGE_for_tau(scenario): # This version finds the optimal tau.
 		scenario_id = save_solution_to_db(scenario, SMDAMAGE, vpt, qapt, Vname, temp_data, scenario_series_entries, bidder_year_rows, artifact_rows)
 	return scenario_id
 
-# This modified version of run_SMDAMAGE() runs 2-year auctions which must be revenue neutral. The auctions should use the calibrated Wpt values.
+# SMDAMAGE_2. This modified version of run_SMDAMAGE() runs 2-year auctions, each of which must be revenue neutral. The auctions should use the calibrated Wpt values.
+# This is the version that could actually be implemented. The auction manager (and policymakers I guess) would have to choose tau[t] in advance.
+# We could end global warming with this.
 def run_SMDAMAGE_short_auctions(scenario):
-	print ("\nSMDAMAGE short auctions. " + defaults_and_utilities.getExperimentTag(scenario) + ". " + time.asctime(time.localtime(time.time())) + ".")
+	print ("\nSMDAMAGE_2, short auctions. " + defaults_and_utilities.getExperimentTag(scenario) + ". " + time.asctime(time.localtime(time.time())) + ".")
 	AllBidPeriods = defaults_and_utilities.getBidPeriods()
 
 	Wpt_dict = get_warming_effects(scenario) # Get warming effects in degrees Celsius in each period, based on the solution vpt.
@@ -545,7 +542,7 @@ def run_SMDAMAGE_short_auctions(scenario):
 	# Agriculture and "Carbon" are in megatons of carbon (not CO2). Hector uses gigatons of carbon, so we need to convert Hector's gigatons warming effects to SMDAMAGE megatons decision variables and back again to Hector gigatons for validation.
 	Units = {b['bidder_name']: b['units'] for b in database_interface.get_bidders()}
 
-	# Create CSV file with headers.
+	# Create CSV file with headers, so we can append results for each auction.
 	with open(defaults_and_utilities.SMDAMAGE_output_file_name(scenario), 'w') as myoutputfile:
 		myoutputfile.write(defaults_and_utilities.getExperimentTag(scenario) + "\n")
 		myoutputfile.write(','.join(['Year'] + [p + " " + Units[p] for p in Pollutants] + [p + " % max bid" for p in Pollutants] + [p + " $M/" + Units[p] for p in Pollutants]) + ',temp change' + ',Capt pi\n')
@@ -554,11 +551,10 @@ def run_SMDAMAGE_short_auctions(scenario):
 	Fixed_Vpt = {(p,t): 0.0 for (p,t) in PT_set}
 
 	# All objective function coefficients should be millions of dollars. So a bid of 1 is a bid for $1 million per unit of the chemical.
-	# Reminder, Carbon is 'ffi' in pulsefile.
-	# Emitters face tax tau. Others do not.
+	# Emitters face tax tau. Others do not. Reminder, Carbon is 'ffi' in pulsefile.
 	Emitters = defaults_and_utilities.getEmitters() # ['C2F6', 'CF4', 'CH4', 'Carbon', 'HFC125', 'HFC134a', 'HFC143a', 'N2O', 'SF6']
 	local_tau = scenario.tau
-	forestry_meta = database_interface.get_forestry_metadata()
+	forestry_meta = database_interface.get_forestry_contractdata()
 	total_area = sum(meta['available_area_mhectares'] for meta in forestry_meta.values())
 
 	# Run 2-year auctions.
@@ -573,12 +569,15 @@ def run_SMDAMAGE_short_auctions(scenario):
 		ConstraintPeriods = [float(BeginConstraintYear) + float(t)/float(hector_interface.getPeriodsPerYear()) for t in range(hector_interface.getPeriodsPerYear()*(defaults_and_utilities.getPulseDataLength() + int(defaults_and_utilities.getStartYear()) - int(BeginConstraintYear)))] # e.g., 2120, 2120.5, 2121, 2121.5, ..., 2301
 		assert (BeginConstraintYear <= defaults_and_utilities.getStartYear() + defaults_and_utilities.getNumber_of_bid_years())
 
-		SMDAMAGE = LpProblem("SMDAMAGE", LpMaximize) # Create model.
+		# Create model & objective.
+		SMDAMAGE = LpProblem("SMDAMAGE", LpMaximize)
 		SMDAMAGE += defaults_and_utilities.inflate_2020_to_2025()*lpSum(Bapt[a,p,t]*qapt[a,p,t] for (a, p, t) in APT_set if t in BidPeriods), "Total value" # Objective.
 
+		# Land constraint. Subtract previously-committed land still in rotation.
 		for t in AllBidPeriods:
 			c_name = f"Forestry_Land_{t}"
-			SMDAMAGE += lpSum(vpt[bidder_name, u] for bidder_name, meta in forestry_meta.items() for u in AllBidPeriods if (bidder_name, u) in vpt and u <= t <= u + meta['rotation_year'] - 1) <= total_area, c_name
+			fixed_land = sum(Fixed_Vpt[bidder_name, u] for bidder_name, meta in forestry_meta.items() for u in FixedPeriods if u <= t <= u + meta['rotation_year'] - 1)
+			SMDAMAGE += lpSum(vpt[bidder_name, u] for bidder_name, meta in forestry_meta.items() for u in AllBidPeriods if (bidder_name, u) in vpt and u <= t <= u + meta['rotation_year'] - 1) <= total_area - fixed_land, c_name
 
 		# Vpt rows.
 		Vname = {}
@@ -587,7 +586,7 @@ def run_SMDAMAGE_short_auctions(scenario):
 				Vname[(p,t)] = "Vpt(" + p + "," + str(t) + ")"
 				SMDAMAGE += vpt[p,t] == lpSum ([qapt[a,p,t] for a in BidStepSet[p,t]]), Vname[(p,t)]
 
-		# Measuring actual temperature change, not the "taxed" surrogate temperature. If REVENUE_NEUTRAL, Temp_t equations should not constrain the model.
+		# Measuring (but not constraining) actual temperature change. If REVENUE_NEUTRAL, Temp_t equations should not constrain the model.
 		temperatureChange = {t: LpVariable("tempChange(" + str(t) + ")", None, None) for t in defaults_and_utilities.getModelPeriods()[len(FixedPeriods):]}
 		for t in defaults_and_utilities.getModelPeriods()[len(FixedPeriods):] : SMDAMAGE += lpSum ([Wpt_dict[(p, float(t - u))]*vpt[p,u] for (p,u) in PT_set if u <= t and u in BidPeriods]) - temperatureChange[t] \
 			+ sum([Wpt_dict[(p, float(t - u))]*Fixed_Vpt[p,u] for (p,u) in PT_set if u <= t and u in FixedPeriods]) == 0, "Temp_t(" + str(t) + ")"
@@ -603,9 +602,9 @@ def run_SMDAMAGE_short_auctions(scenario):
 		# print ("5. Solving the model...")
 		# solve_status = LpStatus[SMDAMAGE.solve(PULP_CBC_CMD(threads=8, msg=0))]
 		solve_status = LpStatus[SMDAMAGE.solve(PULP_CBC_CMD('HiGHS', msg=0))]
-		print (f"SMDAMAGE_short_auctions, solve status {solve_status}. Objective ${value(SMDAMAGE.objective) / 1000:.2f} billion. Start year " + str(startyear) + ", tau=" + str(local_tau) + ", " + str(round(scenario.initial_temperature + temperatureChange [float(startyear+1)].varValue,3)) + " thousandths C.")
+		print (f"SMDAMAGE_2, short_auctions, solve status {solve_status}. Objective ${value(SMDAMAGE.objective) / 1000:.2f} billion. Start year " + str(startyear) + ", tau=" + str(local_tau) + ", " + str(round(scenario.initial_temperature + temperatureChange [float(startyear+1)].varValue,3)) + " thousandths C.")
 
-		# Save a debug model. Easy to open with Notepad or LP_SolveIDE.
+		# Save a debug model. Easy to open with Notepad or LP_SolveIDE, if your computer has the RAM for the big models. Nothing special about 2129, that's just the one I wanted to see once.
 		# if startyear == 2129: SMDAMAGE.writeLP(defaults_and_utilities.getOutputDirectory() + defaults_and_utilities.getExperimentTag(scenario) + "_" + str(startyear) + ".lpt")
 
 		FixedPeriods = FixedPeriods + BidPeriods # Were variable, now fixed for next auction.
@@ -619,7 +618,7 @@ def run_SMDAMAGE_short_auctions(scenario):
 					netrevenue -= vpt[p,t].varValue*SMDAMAGE.constraints[Vname[(p,t)]].pi
 					yearlyrevenue[t] -= vpt[p,t].varValue*SMDAMAGE.constraints[Vname[(p,t)]].pi
 
-		# Append solution to CSV.
+		# Append solution to CSV. Duplicates info stored in the database.
 		with open(defaults_and_utilities.SMDAMAGE_output_file_name(scenario), 'a') as myoutputfile:
 			for t in BidPeriods:
 				line = [str(t)] # Year
@@ -631,7 +630,7 @@ def run_SMDAMAGE_short_auctions(scenario):
 				else: line.append('.')
 				myoutputfile.write(','.join(line) + '\n')
 
-		if startyear+1 >= defaults_and_utilities.getFirstConstrainedYear(): local_tau = 1.0
+		if startyear + 1 >= defaults_and_utilities.getFirstConstrainedYear(): local_tau = 1.0
 	return scenario.initial_temperature + temperatureChange [float(int(max(AllBidPeriods)) - 2)].varValue
 # END run_SMDAMAGE_short_auctions().
 
@@ -657,7 +656,7 @@ if __name__ == "__main__":
 	# defaults_and_utilities.delete_scenario_solution([s for s in range(19,35)])
 
 	# ----------------------------------------------------
-	# # V.A. Figure 1. SMDAMAGE_ST uncalibrated. Uses the same tau for every year.
+	# # V.A. Figure 1. SMDAMAGE_1 uncalibrated. Uses the same tau for every year.
 	primary_tau = 1.8
 	figure1 = defaults_and_utilities.Scenario(comment = "Fig1", discount_rate = 0.03, initial_temperature = 1400.0, tau = primary_tau, is_revenue_neutral = True, is_removal_luc = False, use_updated_Wpt = False)
 	# fig1_Wpt_default_scenario_id = run_SMDAMAGE(figure1) # uncalibrated
@@ -666,7 +665,7 @@ if __name__ == "__main__":
 	# calibrated_initial_temperature = wpt_calibration.run_SMDAMAGE_fit_W(figure1) # Saves figure1.calibrated_initial_temperature
 	# figure1_uncalibrated_actual_temps = get_SMDAMAGE_temps_actual_and_taxed(figure1)[1]
 
-	# # V.B. Figure 1. SMDAMAGE_ST calibrated. discount_rate 0.03, initial_temperature 1097.1234, tau 1.8, is_revenue_neutral True, is_removal_luc False, use_updated_Wpt False.
+	# # V.B. Figure 1. SMDAMAGE_1 calibrated. discount_rate 0.03, initial_temperature 1097.1234, tau 1.8, is_revenue_neutral True, is_removal_luc False, use_updated_Wpt False.
 	# figure1.initial_temperature = database_interface.get_calibrated_initial_temp(figure1)
 	# print("calibrated_initial_temperature = ", figure1.initial_temperature)
 	# figure1.use_updated_Wpt = True
@@ -677,30 +676,30 @@ if __name__ == "__main__":
 	# plotting_utils.Uncalibrated_and_calibrated_temperature_trajectories(defaults_and_utilities.getSolutionsDBPath(), defaults_and_utilities.getOutputDirectory(), fig1_Wpt_default_scenario_id, fig1_Wpt_fitted_scenario_id, fig1_Wpt_fitted_scenario_id)
 
 	# ----------------------------------------------------
-	# # V.C. Figure 2. SMDAMAGE_LT (tau is irrelevant). Robustness to discount rate: initial_temperature initial_temperature = 1097.1234, is_revenue_neutral False, tau is irrelevant, is_removal_luc to False, use_updated_Wpt = True.
+	# # V.C. Figure 2. SMDAMAGE_0 (tau is irrelevant). Robustness to discount rate: initial_temperature initial_temperature = 1097.1234, is_revenue_neutral False, tau is irrelevant, is_removal_luc to False, use_updated_Wpt = True.
 	# Using the original long-term SMDAMAGE formulation, not revenue neutral.
-	calibrated_initial_temperature = database_interface.get_calibrated_initial_temp(figure1)
-	s_id1 = run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Fig2", discount_rate = 0.0, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = False, tau = primary_tau, is_removal_luc = False, use_updated_Wpt = True))
-	s_id2 = run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Fig2", discount_rate = 0.015, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = False, tau = primary_tau, is_removal_luc = False, use_updated_Wpt = True))
-	# Estimate 1 "Full commitment".
-	estimate1_LT_scenario_id = run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Fig2", discount_rate = 0.03, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = False, tau = primary_tau, is_removal_luc = False, use_updated_Wpt = True))
-	s_id4 = run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Fig2", discount_rate = 0.06, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = False, tau = primary_tau, is_removal_luc = False, use_updated_Wpt = True))
-	plotting_utils.Temperature_trajectories_with_4_discount_rates(defaults_and_utilities.getSolutionsDBPath(), defaults_and_utilities.getOutputDirectory(), s_id1, s_id2, estimate1_LT_scenario_id, s_id4)
-	plotting_utils.Price_trajectory_with_full_commitment(defaults_and_utilities.getSolutionsDBPath(), defaults_and_utilities.getOutputDirectory(), estimate1_LT_scenario_id)
+	# calibrated_initial_temperature = database_interface.get_calibrated_initial_temp(figure1)
+	# s_id1 = run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Fig2", discount_rate = 0.0, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = False, tau = primary_tau, is_removal_luc = False, use_updated_Wpt = True))
+	# s_id2 = run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Fig2", discount_rate = 0.015, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = False, tau = primary_tau, is_removal_luc = False, use_updated_Wpt = True))
+	# # Estimate 1 "Full commitment".
+	# estimate1_LT_scenario_id = run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Fig2", discount_rate = 0.03, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = False, tau = primary_tau, is_removal_luc = False, use_updated_Wpt = True))
+	# s_id4 = run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Fig2", discount_rate = 0.06, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = False, tau = primary_tau, is_removal_luc = False, use_updated_Wpt = True))
+	# plotting_utils.Temperature_trajectories_with_4_discount_rates(defaults_and_utilities.getSolutionsDBPath(), defaults_and_utilities.getOutputDirectory(), s_id1, s_id2, estimate1_LT_scenario_id, s_id4)
+	# plotting_utils.Price_trajectory_with_full_commitment(defaults_and_utilities.getSolutionsDBPath(), defaults_and_utilities.getOutputDirectory(), estimate1_LT_scenario_id)
+
+	# # ----------------------------------------------------
+	# # # V.D. Figures 3-5. SMDAMAGE_1, multiple tau: discount_rate to 0.03, initial_temperature 1097.1234, is_revenue_neutral True, tau in a range, is_removal_luc False, use_updated_Wpt True.
+	# calibrated_initial_temperature = database_interface.get_calibrated_initial_temp(figure1)
+	# s_id1 = run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Figs3-5", discount_rate = 0.03, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = True, tau = 1.6, is_removal_luc = False, use_updated_Wpt = True))
+	# s_id2 = run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Figs3-5", discount_rate = 0.03, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = True, tau = 1.8, is_removal_luc = False, use_updated_Wpt = True))
+	# s_id3 = run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Figs3-5", discount_rate = 0.03, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = True, tau = 2.0, is_removal_luc = False, use_updated_Wpt = True))
+	# s_id4 = run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Figs3-5", discount_rate = 0.03, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = True, tau = 2.2, is_removal_luc = False, use_updated_Wpt = True))
+	# plotting_utils.Carbon_emissions_with_4_tau_rates(defaults_and_utilities.getSolutionsDBPath(), defaults_and_utilities.getOutputDirectory(), s_id1, s_id2, s_id3, s_id4)
+	# plotting_utils.Discounted_net_revenue_with_4_tau_rates(defaults_and_utilities.getSolutionsDBPath(), defaults_and_utilities.getOutputDirectory(), s_id1, s_id2, s_id3, s_id4)
+	# plotting_utils.Temperature_trajectories_with_4_tau_rates(defaults_and_utilities.getSolutionsDBPath(), defaults_and_utilities.getOutputDirectory(), s_id1, s_id2, s_id3, s_id4)
 
 	# ----------------------------------------------------
-	# # V.D. Figures 3-5. SMDAMAGE_ST, multiple tau: discount_rate to 0.03, initial_temperature 1097.1234, is_revenue_neutral True, tau in a range, is_removal_luc False, use_updated_Wpt True.
-	calibrated_initial_temperature = database_interface.get_calibrated_initial_temp(figure1)
-	s_id1 = run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Figs3-5", discount_rate = 0.03, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = True, tau = 1.6, is_removal_luc = False, use_updated_Wpt = True))
-	s_id2 = run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Figs3-5", discount_rate = 0.03, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = True, tau = 1.8, is_removal_luc = False, use_updated_Wpt = True))
-	s_id3 = run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Figs3-5", discount_rate = 0.03, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = True, tau = 2.0, is_removal_luc = False, use_updated_Wpt = True))
-	s_id4 = run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Figs3-5", discount_rate = 0.03, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = True, tau = 2.2, is_removal_luc = False, use_updated_Wpt = True))
-	plotting_utils.Carbon_emissions_with_4_tau_rates(defaults_and_utilities.getSolutionsDBPath(), defaults_and_utilities.getOutputDirectory(), s_id1, s_id2, s_id3, s_id4)
-	plotting_utils.Discounted_net_revenue_with_4_tau_rates(defaults_and_utilities.getSolutionsDBPath(), defaults_and_utilities.getOutputDirectory(), s_id1, s_id2, s_id3, s_id4)
-	plotting_utils.Temperature_trajectories_with_4_tau_rates(defaults_and_utilities.getSolutionsDBPath(), defaults_and_utilities.getOutputDirectory(), s_id1, s_id2, s_id3, s_id4)
-
-	# ----------------------------------------------------
-	# # V.E. Estimate 2. Concluding paragraph after Figures 3-5. SMDAMAGE_ST with preferred tau.
+	# # V.E. Estimate 2. Concluding paragraph after Figures 3-5. SMDAMAGE_1 with preferred tau.
 	preferred_tau = 1.7 # Chosen based on the experiment of Figures 3-5, the tau that would result in base zero.
 	# calibrated_initial_temperature = database_interface.get_calibrated_initial_temp(figure1)
 	# estimate2_ST_scenario_id = run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Figs3-5_after", discount_rate = 0.03, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = True, tau = preferred_tau, is_removal_luc = False, use_updated_Wpt = True))
@@ -710,42 +709,43 @@ if __name__ == "__main__":
 	# # The base scenario is discount_rate to 0.03, initial_temperature from the first calibration, is_revenue_neutral True, tau is primary_tau, is_removal_luc to False, use_updated_Wpt = True, but with an earlier Wpt, so use False here.
 	# VI.A. Weak contracts: first run with uncalibrated SMDAMAGE. TODO: Confirm best tau for weak contracts; guessing at tau=2.4.
 	# For the case of weak contracts, use discount_rate to 0.03, initial_temperature from the first calibration, is_revenue_neutral True, tau is 2.4, is_removal_luc to True, use_updated_Wpt = False.
-	# calibrated_initial_temperature = database_interface.get_calibrated_initial_temp(figure1)
-	# contracts_scenario = defaults_and_utilities.Scenario(comment = "Contracts", discount_rate = 0.03, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = True, tau = 2.4, is_removal_luc = True, use_updated_Wpt = False)
-	# run_SMDAMAGE(contracts_scenario) # uncalibrated. Can't use the Fig 1 calibration because we changed from ffi warming coefficients to luc warming coefficients.
-	# hector_interface.run_Hector_with_SMDAMAGE_solution(contracts_scenario)
-	# plotting_utils.plot_temps_SMDAMAGE_and_Hector(contracts_scenario, *get_SMDAMAGE_temps_actual_and_taxed(contracts_scenario), hector_interface.get_Hector_temperature(contracts_scenario), defaults_and_utilities.getOutputDirectory, defaults_and_utilities.experimentTag_to_file_name)
+	calibrated_initial_temperature = database_interface.get_calibrated_initial_temp(figure1)
+	contracts_scenario = defaults_and_utilities.Scenario(comment = "Contracts", discount_rate = 0.03, initial_temperature = calibrated_initial_temperature, is_revenue_neutral = True, tau = 2.4, is_removal_luc = True, use_updated_Wpt = False)
+	run_SMDAMAGE(contracts_scenario) # uncalibrated. Can't use the Fig 1 calibration because we changed from ffi warming coefficients to luc warming coefficients.
+	hector_interface.run_Hector_with_SMDAMAGE_solution(contracts_scenario)
+	plotting_utils.plot_temps_SMDAMAGE_and_Hector(contracts_scenario, *get_SMDAMAGE_temps_actual_and_taxed(contracts_scenario), hector_interface.get_Hector_temperature(contracts_scenario), defaults_and_utilities.getOutputDirectory, defaults_and_utilities.experimentTag_to_file_name)
 
-	# # VI.B & C. Weak contracts: Calibrate W for the contracts scenario, then run the calibrated SMDAMAGE.
-	# contracts_scenario.initial_temperature = wpt_calibration.run_SMDAMAGE_fit_W(contracts_scenario)
-	# contracts_scenario.use_updated_Wpt = True
-	# estimate3_weak_contracts_scenario_id = run_SMDAMAGE(contracts_scenario) # calibrated to luc warming coefficients.
-	# hector_interface.run_Hector_with_SMDAMAGE_solution(contracts_scenario)
-	# plotting_utils.plot_temps_SMDAMAGE_and_Hector(contracts_scenario, *get_SMDAMAGE_temps_actual_and_taxed(contracts_scenario), hector_interface.get_Hector_temperature(contracts_scenario), defaults_and_utilities.getOutputDirectory, defaults_and_utilities.experimentTag_to_file_name)
+	# VI.B & C. Weak contracts: Calibrate W for the contracts scenario, then run the calibrated SMDAMAGE.
+	contracts_scenario.initial_temperature = wpt_calibration.run_SMDAMAGE_fit_W(contracts_scenario)
+	contracts_scenario.use_updated_Wpt = True
+	estimate3_weak_contracts_scenario_id = run_SMDAMAGE(contracts_scenario) # calibrated to luc warming coefficients.
+	hector_interface.run_Hector_with_SMDAMAGE_solution(contracts_scenario)
+	plotting_utils.plot_temps_SMDAMAGE_and_Hector(contracts_scenario, *get_SMDAMAGE_temps_actual_and_taxed(contracts_scenario), hector_interface.get_Hector_temperature(contracts_scenario), defaults_and_utilities.getOutputDirectory, defaults_and_utilities.experimentTag_to_file_name)
 
 	# ----------------------------------------------------
 	# # VII. Short auctions, 2 years at a time.
-	# # VII.A. Calibrate with a long-term model.
-	# calibrated_initial_temperature = database_interface.get_calibrated_initial_temp(figure1)
-	# Short_auctions_scenario = defaults_and_utilities.Scenario(comment = "Short auctions", discount_rate = 0.03, initial_temperature = calibrated_initial_temperature, tau = primary_tau, is_revenue_neutral = True, is_removal_luc = False, use_updated_Wpt = False)
-	# run_SMDAMAGE(Short_auctions_scenario) # A long auction for calibrating the short auctions.
-	# hector_interface.run_Hector_with_SMDAMAGE_solution(Short_auctions_scenario) # 3. Run Hector on SMDAMAGE output.
+	# # VII.A. Use a long-term model SMDAMAGE_1 to calibrate SMDAMAGE_2.
+	calibrated_initial_temperature = database_interface.get_calibrated_initial_temp(figure1)
+	Short_auctions_scenario = defaults_and_utilities.Scenario(comment = "Short auctions", discount_rate = 0.03, initial_temperature = calibrated_initial_temperature, tau = primary_tau, is_revenue_neutral = True, is_removal_luc = False, use_updated_Wpt = False)
+	run_SMDAMAGE(Short_auctions_scenario) # A long auction for calibrating the short auctions.
+	hector_interface.run_Hector_with_SMDAMAGE_solution(Short_auctions_scenario) # Run Hector on SMDAMAGE output.
+	calibrated_initial_temperature = wpt_calibration.run_SMDAMAGE_fit_W(Short_auctions_scenario) # Calibrate Wpt to Hector results.
 
-	# # VII.B. Run the short auctions.
-	# calibrated_initial_temperature = wpt_calibration.run_SMDAMAGE_fit_W(Short_auctions_scenario)
-	# Short_auctions_scenario.initial_temperature = calibrated_initial_temperature
-	# Short_auctions_scenario.use_updated_Wpt = True # Use this updated_Wpt for the short auctions.
-	# estimate4_short_auctions_scenario_id = run_SMDAMAGE_short_auctions(Short_auctions_scenario) # Results in excess cooling. Hence the search for tau by year.
+	# # VII.B. Run the short auctions SMDAMAGE_2.
+	Short_auctions_scenario.initial_temperature = calibrated_initial_temperature
+	Short_auctions_scenario.use_updated_Wpt = True # Use the updated_Wpt for the short auctions.
+	estimate4_short_auctions_scenario_id = run_SMDAMAGE_short_auctions(Short_auctions_scenario) # Results in excess cooling. Hence the search for tau by year.
 
 	# ----------------------------------------------------
 	# Search for tau. Start with tau = primary_tau for each constrained year, then subgradient optimization to choose tau for each year. Use calibrated_initial_temperature from VII.B.
-	# tau_search = defaults_and_utilities.Scenario(comment = "Tau search", discount_rate = 0.03, initial_temperature = calibrated_initial_temperature, tau = primary_tau, is_revenue_neutral = True, is_removal_luc = False, use_updated_Wpt = True)
-	# estimate5_tau_search_scenario_id = run_SMDAMAGE_for_tau (tau_search) # Repeated solution of SMDAMAGE with subgradient optimization on tau.
-	# print ("\nSMDAMAGE code complete. " + defaults_and_utilities.getExperimentTag(tau_search) + ". " + time.asctime(time.localtime(time.time())) + ".")
+	tau_search = defaults_and_utilities.Scenario(comment = "Tau search", discount_rate = 0.03, initial_temperature = calibrated_initial_temperature, tau = primary_tau, is_revenue_neutral = True, is_removal_luc = False, use_updated_Wpt = True)
+	estimate5_tau_search_scenario_id = run_SMDAMAGE_for_tau (tau_search) # Repeated solution of SMDAMAGE with subgradient optimization on tau.
+	print ("\nSMDAMAGE code complete. " + defaults_and_utilities.getExperimentTag(tau_search) + ". " + time.asctime(time.localtime(time.time())) + ".")
 	# ----------------------------------------------------
 
 	# Table at end
-	# estimate1_LT_scenario_id = 5; estimate2_ST_scenario_id = 16; estimate3_weak_contracts_scenario_id = 13; estimate4_short_auctions_scenario_id = 14; estimate5_tau_search_scenario_id = 15
-	# plotting_utils.Summary_of_estimates_to_end_global_warming(defaults_and_utilities.getSolutionsDBPath(), estimate3_weak_contracts_scenario_id, estimate1_LT_scenario_id, estimate4_short_auctions_scenario_id, estimate2_ST_scenario_id, estimate5_tau_search_scenario_id, defaults_and_utilities.getOutputDirectory())
+	estimate1_LT_scenario_id = 5; estimate2_ST_scenario_id = 16; estimate3_weak_contracts_scenario_id = 13; estimate4_short_auctions_scenario_id = 14; estimate5_tau_search_scenario_id = 15
+	plotting_utils.Summary_of_estimates_to_end_global_warming(defaults_and_utilities.getSolutionsDBPath(), estimate3_weak_contracts_scenario_id, estimate1_LT_scenario_id, estimate4_short_auctions_scenario_id, estimate2_ST_scenario_id, estimate5_tau_search_scenario_id, defaults_and_utilities.getOutputDirectory())
+	print ("Reminder: convert $/ton C to $/ton CO2.")
 	import winsound
 	winsound.Beep(700, 500)  # Frequency: 1000 Hz, Duration: 500 ms
