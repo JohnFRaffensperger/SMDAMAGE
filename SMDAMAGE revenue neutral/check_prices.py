@@ -47,7 +47,7 @@ def get_bid_and_price_info(scenario_id, bidder, year):
     print(f"  discount_rate: {discount_rate}  start_year: {start_year}  inflate: {inflate}")
     print(f"  vpt value: {vpt_value}  dual price: {dual_price}")
     print(f"  {'step':>5}  {'price_per_unit':>16}  {'qty':>12}  {'cumulative_qty':>16}  {'obj_coeff (inflated)':>22}")
-    is_remover = bidders_info.get(bidder, {}).get('class', '').lower() == 'remover'
+    is_remover = bidders_info[bidder]['class'].lower() == 'remover'
     cumulative_qty = [0.0] * len(curve)
     running = 0.0
     if is_remover:
@@ -60,7 +60,7 @@ def get_bid_and_price_info(scenario_id, bidder, year):
             cumulative_qty[idx] = running
     for idx, (price, qty) in enumerate(curve):
         coeff = price * inflate * df
-        if bidders_info.get(bidder, {}).get('units') == 'kt': coeff /= 1000.0
+        if bidders_info[bidder]['units'] == 'kt': coeff /= 1000.0
         print(f"  {idx:>5}  {price:>16.6f}  {qty:>12.4f}  {cumulative_qty[idx]:>16.4f}  {coeff:>22.8f}")
 
 # get_bid_and_price_info(scenario_id=1, bidder="Agriculture", year=2102.0)

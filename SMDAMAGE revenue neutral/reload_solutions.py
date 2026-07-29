@@ -150,7 +150,7 @@ def reload_solutions():
                 if not curve: continue
                 dual_price = duals_map.get((bidder, year), 0.0)
                 df_factor = 1.0 / ((1.0 + params['discount_rate'])**(year - start_year))
-                is_kt = bidders_info.get(bidder, {}).get('units') == 'kt'
+                is_kt = bidders_info[bidder]['units'] == 'kt'
                 threshold = -dual_price
                 for idx, (price, qty) in enumerate(curve):
                     coeff = price * inflate * df_factor

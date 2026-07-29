@@ -297,7 +297,7 @@ def Summary_of_estimates_to_end_global_warming(db_path, scenario_id_1, scenario_
 	end_year = 2125.0
 
 	# Order presented in the paper.
-	columns = [("Estimate 3", "ST, weak contracts"), ("Estimate 1", "LT"), ("Estimate 4", "ST, short auctions"), ("Estimate 2", "ST"), ("Estimate 5", "ST, time-varying τ"),]
+	columns = [("Estimate 3, weak contracts", "SMDAMAGE_1"), ("Estimate 1, 3rd party pays", "SMDAMAGE_0"), ("Estimate 4, short auctions", "SMDAMAGE_2"), ("Estimate 2, fixed tau", "SMDAMAGE_1"), ("Estimate 5, dynamic tau", "SMDAMAGE_1"),]
 	scenario_ids = [scenario_id_1, scenario_id_2, scenario_id_3, scenario_id_4, scenario_id_5]
 
 	def _trim_number(value, decimals=2):
@@ -307,8 +307,13 @@ def Summary_of_estimates_to_end_global_warming(db_path, scenario_id_1, scenario_
 	def _load_scalar(cursor, sql, params):
 		cursor.execute(sql, params)
 		row = cursor.fetchone()
-		if row is None or row[0] is None: raise ValueError(f"Missing summary data for query: {sql!r} params={params!r}")
+		if row is None or row[0] is None: return None
 		return row[0]
+
+	def _fmt(value, prefix="$", suffix="", decimals=2):
+		if value is None: return "N/A"
+		s = prefix + _trim_number(value, decimals)
+		return (s + " " + suffix) if suffix else s
 
 	conn = sqlite3.connect(db_path)
 	cursor = conn.cursor()
@@ -317,19 +322,20 @@ def Summary_of_estimates_to_end_global_warming(db_path, scenario_id_1, scenario_
 	average_remover_price = []
 	emissions_2025_2125 = []
 	removal_cost_2025_2125 = []
+	land_rents = []
 
 	for _, scenario_id in zip(columns, scenario_ids):
 		net_revenue = _load_scalar(cursor, "SELECT net_revenue FROM scenarios WHERE id = ?", (scenario_id,))
-		third_party_pays.append(net_revenue / 1_000_000.0) # Convert millions to trillions.
+		third_party_pays.append(net_revenue / 1_000_000.0 if net_revenue is not None else None) # Convert millions to trillions.
 
 		avg_emitter_price = _load_scalar(cursor, "SELECT AVG(dual_price) FROM scenario_bidder_year WHERE scenario_id = ? AND bidder = ? AND year >= ? AND year <= ?", (scenario_id, "Carbon", begin_year, end_year),)
-		average_emitter_price.append((avg_emitter_price, avg_emitter_price * 44.0 / 12.0)) # Convert $/C to $/CO2.
+		average_emitter_price.append((avg_emitter_price, avg_emitter_price * 44.0 / 12.0) if avg_emitter_price is not None else (None, None)) # Convert $/C to $/CO2.
 
-		avg_remover_price = _load_scalar(cursor, "SELECT AVG(dual_price) FROM scenario_bidder_year WHERE scenario_id = ? AND bidder = ? AND year >= ? AND year <= ?", (scenario_id, "Agriculture", begin_year, end_year), )
-		average_remover_price.append((avg_remover_price, avg_remover_price * 44.0 / 12.0)) # Convert $/C to $/CO2.
+		avg_remover_price = _load_scalar(cursor, "SELECT AVG(dual_price) FROM scenario_bidder_year WHERE scenario_id = ? AND bidder = ? AND year >= ? AND year <= ?", (scenario_id, "Agriculture", begin_year, end_year),)
+		average_remover_price.append((avg_remover_price, avg_remover_price * 44.0 / 12.0) if avg_remover_price is not None else (None, None)) # Convert $/C to $/CO2.
 
-		emissions = _load_scalar(cursor, "SELECT SUM(quantity_value) FROM scenario_bidder_year WHERE scenario_id = ? AND bidder = ? AND year >= ? AND year <= ?", (scenario_id, "Carbon", begin_year, end_year), )
-		emissions_2025_2125.append(emissions / 1000.0)  # Convert mtC to gtC.
+		emissions = _load_scalar(cursor, "SELECT SUM(quantity_value) FROM scenario_bidder_year WHERE scenario_id = ? AND bidder = ? AND year >= ? AND year <= ?", (scenario_id, "Carbon", begin_year, end_year),)
+		emissions_2025_2125.append(emissions / 1000.0 if emissions is not None else None) # Convert mtC to gtC.
 
 		removers = defaults_and_utilities.getRemovers()
 		removal_cost = 0.0
@@ -338,16 +344,20 @@ def Summary_of_estimates_to_end_global_warming(db_path, scenario_id_1, scenario_
 			removal_cost += cursor.fetchone()[0] or 0.0
 		removal_cost_2025_2125.append(removal_cost / 1_000_000.0)
 
+		land_rent = _load_scalar(cursor, "SELECT land_rent FROM scenarios WHERE id = ?", (scenario_id,))
+		land_rents.append(land_rent / 1_000_000.0 if land_rent is not None else None) # Convert millions to trillions.
+
 	conn.close()
 
 	lines = []
 	lines.append("\t".join([estimate_label for estimate_label, _ in columns]))
 	lines.append("\t".join(["Model"] + [model_label for _, model_label in columns]))
-	lines.append("\t".join(["Third party pays"] + ["$" + _trim_number(value) + " trillion" for value in third_party_pays]))
-	lines.append("\t".join(["Average emitter price"] + [f"${_trim_number(price_tC)} /tC (${_trim_number(price_tCO2)} /tCO2)".replace(" ", "") for price_tC, price_tCO2 in average_emitter_price]))
-	lines.append("\t".join(["Average remover price"] + [f"${_trim_number(price_tC)} /tC (${_trim_number(price_tCO2)} /tCO2)".replace(" ", "") for price_tC, price_tCO2 in average_remover_price]))
-	lines.append("\t".join(["Emissions 2025-2125"] + [f"{_trim_number(value, 1)} GtC" for value in emissions_2025_2125]))
-	lines.append("\t".join(["Removal cost 2025-2125"] + ["$" + _trim_number(value) + " trillion" for value in removal_cost_2025_2125]))
+	lines.append("\t".join(["Third party pays"] + [_fmt(v, suffix="trillion") for v in third_party_pays]))
+	lines.append("\t".join(["Average emitter price"] + [f"${_trim_number(p)}/tC (${_trim_number(q)}/tCO2)" if p is not None else "N/A" for p, q in average_emitter_price]))
+	lines.append("\t".join(["Average remover price"] + [f"${_trim_number(p)}/tC (${_trim_number(q)}/tCO2)" if p is not None else "N/A" for p, q in average_remover_price]))
+	lines.append("\t".join(["Emissions 2025-2125"] + [_fmt(v, prefix="", suffix="GtC", decimals=1) for v in emissions_2025_2125]))
+	lines.append("\t".join(["Removal cost 2025-2125"] + [_fmt(v, suffix="trillion") for v in removal_cost_2025_2125]))
+	lines.append("\t".join(["Land rent"] + [_fmt(v, suffix="trillion") for v in land_rents]))
 
 	table_text = "\n".join(lines)
 	print(table_text)

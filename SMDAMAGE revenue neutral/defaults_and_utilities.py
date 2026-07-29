@@ -122,7 +122,7 @@ def inflate_2020_to_2025(): 		return 1.23 # Inflate prices from 2020 to 2025. Fr
 def dateTimeString(): return time.strftime("%Y%m%d%H%M", time.localtime())
 
 class Scenario(object):
-	def __init__(self, comment = '', discount_rate = 0.03, initial_temperature = 1400.0, is_revenue_neutral = False, tau = 1.0, is_removal_luc = False, use_updated_Wpt = False):
+	def __init__(self, comment = '', discount_rate = 0.03, initial_temperature = 1400.0, is_revenue_neutral = False, tau = 1.0, is_removal_luc = False, use_updated_Wpt = False, calibration_scenario_id = None):
 		self.comment = comment
 		self.discount_rate_base = discount_rate
 		self.initial_temperature = initial_temperature
@@ -130,6 +130,7 @@ class Scenario(object):
 		self.tau = tau
 		self.is_removal_luc = is_removal_luc
 		self.use_updated_Wpt = use_updated_Wpt
+		self.calibration_scenario_id = calibration_scenario_id
 	def discount_rate(self, periods): return 1.0/(1.0 + self.discount_rate_base)**(periods)
 # your_sample_scenario = Scenario(comment = "Contracts", discount_rate = 0.03, initial_temperature = 971.24975, is_revenue_neutral = True, tau = 2.6, is_removal_luc = True, use_updated_Wpt = False)
 
