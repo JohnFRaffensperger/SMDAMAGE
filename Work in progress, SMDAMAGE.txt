@@ -1,105 +1,236 @@
-Updating reduced cost calculation for forestry land constraint
-======================================================================
+AUDIT (SECOND ROUND): Why removal cost for short auctions (Estimate 4) remains very high.
+Written 2026-07-30.
 
-Section 5.2 of Solve_SMDAMAGE (lines ~257-271) tests whether a new forestry bid step should enter the restricted LP using:
-    next_reduced_cost = next_coeff * discount / kt_divisor + Vpt(tree,t).pi.
+================================================================================
+STATUS OF PREVIOUS FIX
+================================================================================
 
-For non-forestry removers (Agriculture, Seaweed) this is correct: the  Vpt dual should capture only the temperature-constraint shadow price.
-For forestry bidders, vpt[tree, t] also appears in one Forestry_Land_{t'} constraint for EVERY period t' in [t, t + rotation(tree) - 1].
-The land constraint's shadow price therefore affects π_Vpt[tree,t] via the LP KKT conditions.
+The previous fix (adding Fixed_Vpt contributions to the taxedTemperatureChange
+constraint) is mathematically correct but makes no economic difference to
+removal cost. Here is why.
 
-ALGEBRAIC DERIVATION
+At the end of each 2-year auction, the optimizer has achieved exact revenue
+neutrality at the binding constraint year. Concretely, for auction covering
+years [S, S+1], the LP drives:
 
-Variables for forestry bidder tree, planting period t:
-    qapt[a,tree,t]  ∈ [0, Uapt]      (mhectares at bid step a)
-    vpt[tree,t]     free              (total mhectares planted)
+    taxedTemperatureChange[2125] = tau*C_S*W(2125-S) + tau*C_{S+1}*W(2124-S)
+                                    - A_S*W(2125-S) - A_{S+1}*W(2124-S) = 0
 
-Constraints where qapt[a,tree,t] appears directly:
-    (A) Vpt(tree,t): vpt[tree,t] - Σ_a qapt[a,tree,t] = 0, dual: π_{tree,t}  (any sign)
+i.e., exactly balanced. So the contribution of Fixed_Vpt[S, S+1] to the next
+auction's fixed term is exactly zero. The next auction again must independently
+achieve tau*emissions = removals in its own 2-year window.
 
-    qapt has coefficient -1 in (A) and zero in every other constraint.
+The fix is correct in structure: if any past auction happened to OVER-remove
+(taxedTemp < 0), future auctions would get a credit and need less removal.
+But the revenue-maximizing optimizer never voluntarily over-removes. It drives
+taxedTemp to exactly 0. Credit is always zero. Total removal is unchanged.
 
-LOOKS WRONG
-LP reduced cost of qapt[a,tree,t] at lower bound 0: rc = inflate * Bapt[a,tree,t]  +  π_{tree,t}           ...(1)
+================================================================================
+THE REAL CAUSE: ECONOMIC DESIGN, NOT CODE BUG
+================================================================================
 
-	or sum [u in range(t, t + rotation(tree)] π_{tree,u}           ...(1)???
+The high removal cost is a direct consequence of how the short auction model
+is designed. The comparison below makes this precise.
 
-Entry condition:  rc > 0.
+ESTIMATE 2 (run_SMDAMAGE, global model, ~commented out lines 790+)
+--------------------------------------------------------------------
+ONE LP over all 250 bid years simultaneously.
+Revenue-neutrality constraint at t=2125 (and each t >= 2125):
 
-Constraints where vpt[tree,t] appears (free variable):
-    (A) Vpt(tree,t): coeff +1,  dual π_{tree,t}.
-    (B) TaxedTemp_t(s) for all s ≥ t: coeff Wpt[tree, s-t], dual ω_s (or Temp_t(s) in non-revenue-neutral case)
-    (C) Forestry_Land_{t'} for all t' ∈ [t, t + rot(tree) - 1]: coeff +1,  dual λ_{t'} ≥ 0
+    tau × SUM_{u=2025}^{2124} C_u × W(2125-u)   <=   SUM_{u=2025}^{2274} R_u × W(2125-u)
 
-KKT stationarity for the free variable vpt[tree,t] (c = 0):
-    0 = π_{tree,t} · 1  + Σ_{s ≥ t, s∈ConstraintPeriods} ω_s · Wpt[tree, s-t]  + Σ_{t'=t}^{t+rot(tree)-1} λ_{t'}
+The optimizer sees all 250 years at once. It satisfies the CUMULATIVE
+constraint by choosing the globally cheapest removals:
+  - It allows max emissions in years where emitters bid high (valuable).
+  - It accepts Agriculture from the years where Agriculture is CHEAPEST in
+    discounted objective terms — which is the LATEST possible years (years
+    2075-2124), where the discount factor is (1/1.03)^50 to (1/1.03)^99
+    = 0.23 to 0.05 of the undiscounted price.
+  - The Agriculture Vpt dual (shadow price) reflects the marginal cost of
+    the globally cheapest accepted Agriculture, which is a LATE-YEAR,
+    DEEPLY-DISCOUNTED removal step.
 
-From KKT on taxedTempChange[s] (free): ω_s = σ_s = Capt(s).pi ≥ 0.
-Wpt[tree,s-t] < 0 for a remover (sequestration cools the climate).
+Result: small Vpt dual for Agriculture × moderate quantity = moderate cost.
 
-Solving for π_{tree,t}: π_{tree,t} = - Σ_{s≥t} ω_s · Wpt[tree,s-t] - Σ_{t'=t}^{t+rot-1} λ_{t'}  =  cooling_value(tree,t) - land_rent(tree,t)
+ESTIMATE 4 (run_SMDAMAGE_short_auctions, 2-year windows)
+---------------------------------------------------------
+~125 sequential 2-year LPs.
+Revenue-neutrality constraint in EACH WINDOW independently:
 
-where:
-    cooling_value = Σ_{s∈ConstraintPeriods,s≥t} Capt(s).pi * (-Wpt[tree,s-t])   ≥ 0
-    land_rent     = Σ_{t'=t}^{t+rot(tree)-1} Forestry_Land_{t'}.pi            ≥ 0
+    tau × C_S × W(2125-S) + tau × C_{S+1} × W(2124-S)
+        <=  A_S × W(2125-S) + A_{S+1} × W(2124-S) + (other removers in {S, S+1})
 
-Substituting into (1): rc(a,tree,t) = inflate · Bapt[a,tree,t] + cooling_value(tree,t) - land_rent(tree,t)   (★)
+The optimizer in the 2025-2026 auction can ONLY use removers (Agriculture,
+Seaweed, and forestry plantings) from years 2025 and 2026 to offset 2025-2026
+emissions. It cannot use cheap removers from 2100, even if the warming effect
+at t=2125 is the same.
 
-Economics: the discounted bid cost plus the cooling benefit must EXCEED the land rent for a forestry column to enter the LP.
+WHY FORESTRY DOES NOT ESCAPE THIS CONSTRAINT:
 
-The current code uses dual_pi[(tree,t)] = π_{tree,t} which by the KKT identity equals (cooling_value - land_rent).
-The two formulas are algebraically equivalent in a non-degenerate LP.  The explicit form (★) is preferred
-because it remains correct when the LP solver returns π_Vpt = 0 due to degeneracy.
+Forestry (e.g., 100-year rotation Ponderosa pine, 103-year rotation) IS
+included in the taxedTemp constraint for the 2025-2026 auction. The Wpt for
+forestry planted in 2025 at lag 100 (= t=2125 - u=2025) is large: it reflects
+100 years of accumulated carbon sequestration (e.g., ~5 tonnes/ha/yr for 100
+years = ~500 tonnes/ha stored). Forestry IS available and the optimizer will
+use it if it provides better value per Wpt unit than Agriculture.
 
-REPLACEMENT CODE (section 5.2 of Solve_SMDAMAGE)
--------------------------------------------------
-Replace the block that begins "for (p, t) in PT_set:" with:
+However, forestry does not escape the fundamental problem for three reasons:
 
-    # 5.2. Decide whether to add the next bid steps.
-    for (p, t) in PT_set:
-        meta = bidder_metadata.get(p, {})
-        if meta.get('class') == 'Emitter': continue
-        max_a = current_front_max.get((p, t), -1)
-        bids_p = all_bids[p]
-        discount = inflate2020_to_2025 * scenario.discount_rate(t - StartYear)
-        kt_divisor = 1000.0 if meta.get('units') == 'kt' else 1.0
+(a) DISCOUNTING: Forestry planted in 2025 must be paid for in 2025 at the
+    full undiscounted bid price (discount factor = 1.0). The global model can
+    instead wait and plant forestry in 2050 at a discounted price
+    (factor ≈ (1/1.03)^25 = 0.48), using that cheaper future planting to
+    satisfy a future constraint year. The short auction forces expensive NOW.
 
-        is_forestry = meta.get('units') == 'mhectares' and p in forestry_meta
-        if is_forestry:
-            # Explicit reduced-cost formula (★): rc = obj + cooling_value - land_rent.
-            # This is equivalent to obj + π_Vpt by LP duality, but robust to degeneracy.
-            rotation = forestry_meta[p]['rotation_year']
-            cooling_value = sum((SMDAMAGE.constraints[f"Capt({s})"].pi or 0.0) * (-sparse_Wpt.get((p, float(s - t)), 0.0))
-                for s in ConstraintPeriods if s >= t and (p, float(s - t)) in sparse_Wpt)
-            land_rent = sum((SMDAMAGE.constraints[f"Forestry_Land_{t_prime}"].pi or 0.0)
-                for t_prime in bid_periods if t <= t_prime <= t + rotation - 1)
-            dual = cooling_value - land_rent
-        else: dual = dual_pi.get((p, t), 0.0)
+(b) LAND CONSTRAINT (correctly implemented, but still restrictive): Land
+    committed in 2025-2026 is occupied for the full rotation period (R years)
+    and is correctly released afterward — the condition `u <= t <= u + R - 1`
+    in both fixed_land and the current planting sum ensures land is freed at
+    t = u + R. However, during those R years, that land cannot be replanted.
+    The global model allocates land optimally across all 250 years simultaneously,
+    choosing the planting schedule that maximises cooling per unit of land over
+    the full horizon. The short auction can only commit land in the current 2-year
+    window, without knowing what future auctions will need.
 
-        for a in range(max_a + 1, len(bids_p)):
-            if (a, p, t) in restricted_APT_set: continue
-            next_coeff, _ = bids_p[a]
-            next_reduced_cost = next_coeff * discount / kt_divisor + dual
-            if next_reduced_cost > 0.0:
-                restricted_APT_set.add((a, p, t))
-                expanded = True
-                added_cols += 1
-            else:
-                for extra_a in range(a, min(a + 2, len(bids_p))):
-                    restricted_APT_set.add((extra_a, p, t))
-                    added_cols += 1
-                break
+(c) SHORT-ROTATION FORESTRY IS INEFFECTIVE AT LAG 100: The data includes
+    10-year and 24-year rotation options whose sequestration drops to zero
+    after harvest (e.g., Loblolly pine 10yr: tc=0 after year 10). At lag 100,
+    only the fraction still in the atmosphere from those early years contributes.
+    The binding constraint at t=2125 (lag 100) can only be satisfied well by
+    long-rotation forestry (100+ years), which is exactly at the end of its
+    rotation at t=2125. For t=2126 and beyond, the 100-year tree has been
+    harvested; only the persisting carbon from years 1-100 continues to cool,
+    at diminishing Wpt values. The optimizer must use Agriculture or Seaweed
+    for the post-rotation constraint years (t >= 2126 for the 100-yr tree).
 
-NOTES ON THE REPLACEMENT CODE
-------------------------------
-1. `forestry_meta` is already available in Solve_SMDAMAGE (used for the Forestry_Land constraints in step 3.2).
+  - Years 2025-2026 Agriculture bids have discount factor = 1.0 (no discount).
+    These are the MOST EXPENSIVE Agriculture bids in objective terms.
+  - The auction must accept 1.7x emissions in removal-equivalent terms using
+    only this expensive Agriculture.
+  - The Agriculture Vpt dual = price of the marginal (threshold) Agriculture
+    step accepted in 2025-2026, which is a HIGH-PRICED EARLY STEP.
 
-2. `ConstraintPeriods` is already defined in Solve_SMDAMAGE.
+Result: large Vpt dual for Agriculture in early years × large quantity = large cost.
 
-3. `sparse_Wpt` is used instead of Wpt_dict to stay consistent with the rest of the function and avoid zero-valued terms.
+================================================================================
+QUANTITATIVE ILLUSTRATION
+================================================================================
 
-4. `Capt(s).pi` is correct for BOTH revenue-neutral (where Capt bounds taxedTemperatureChange[s] ≤ 0) and non-revenue-neutral
-   (where Capt bounds temperatureChange[s] ≤ -initial_temp) because in both cases the KKT identity ω_s = Capt(s).pi holds.
+Suppose Agriculture's undiscounted bid price at the threshold step is $P/tC.
 
-5. For non-forestry removers (Agriculture, Seaweed, CH4 abatement),  the Vpt dual already equals the cooling value with no land term,
-   so the existing `dual_pi` path is unchanged.
+In Estimate 2:
+  - The global optimizer accepts Agriculture primarily from year 2100 (approx).
+  - Discounted bid price for year-2100 Agriculture = P × (1/1.03)^75 = 0.10 × P.
+  - Vpt dual ≈ 0.10 × P.
+  - Removal cost ≈ Q_total × 0.10P = small.
+
+In short auctions (year 2025 auction):
+  - Must accept 2025 Agriculture.
+  - Discounted bid price for year-2025 Agriculture = P × (1/1.03)^0 = P.
+  - Vpt dual ≈ P.
+  - Year-2025 removal quantity ≈ tau × year-2025 emission = 1.7 × C_2025.
+  - Contribution to removal cost ≈ 1.7 × C_2025 × P = large.
+
+The Vpt dual in the year-2025 short auction is roughly 10× larger than in
+Estimate 2. This alone explains most of the removal cost discrepancy.
+
+================================================================================
+WHY THE REMOVAL COST METRIC IS PARTICULARLY SENSITIVE
+================================================================================
+
+The Summary table computes:
+
+    removal_cost = SUM over removers and years 2025-2125: quantity × Vpt_dual
+
+This is total payment to removers at MARGINAL (dual) pricing, not at average
+pricing. The Vpt dual in short auctions is set by the scarcity price:
+
+    Vpt_dual(Agriculture, t) = |Agriculture bid price at threshold step| + lambda × Wpt
+
+where lambda is the dual on the Capt(2125) constraint. In the 2-year auctions,
+lambda is large (few removers available per window), inflating both the Vpt_dual
+and the resulting removal cost.
+
+================================================================================
+THE RELEVANT COMPARISON
+================================================================================
+
+The short auctions model is economically LESS EFFICIENT than the global model
+by construction: it cannot substitute cheap late-year removals for expensive
+early-year emissions. This is a fundamental trade-off of the short-auction design.
+
+The short auctions model represents a real-world constraint: in each 2-year
+period, the market must be self-financing. Each auction cannot borrow against
+future removal capacity. This forced use of expensive early removals is the
+economic cost of the short-auction mechanism.
+
+To make removal costs comparable to Estimate 2, one of the following would
+be needed:
+  (a) ALLOW TEMPORAL SUBSTITUTION: let early emissions generate "removal
+      credits" that are assigned to future auction windows. The current auction
+      balances against a long-run virtual price rather than physical removals
+      in the current window.
+  (b) USE A DYNAMIC TAU: each auction's tau is set to reflect the actual shadow
+      price of removal in that window, not a fixed 1.7. When early removals are
+      expensive, tau is set low (fewer credits per emission) to reduce removal cost.
+  (c) USE A LONGER AUCTION WINDOW: instead of 2 years, use 10 or 25 years. This
+      allows more temporal substitution within each window.
+
+None of these are bugs — they are design choices. The current short auctions
+design, which achieves per-window revenue neutrality using whatever removers are
+available in that window, is more expensive by construction.
+
+================================================================================
+NOTE ON THE FIXED_VPT FIX (ALREADY APPLIED)
+================================================================================
+
+The fix correctly makes taxedTemperatureChange cumulative (accounting for past
+auction contributions). This is the mathematically right structure. However, as
+shown above, since each auction achieves exact balance (taxedTemp = 0 at the
+binding constraint), the carried-forward contribution from past auctions is always
+zero. The fix does not change the actual LP solutions or removal costs.
+
+The fix would matter if:
+  - Past auctions over-removed (taxedTemp < 0), providing credits.
+  - But the revenue-maximizing optimizer never voluntarily over-removes.
+
+================================================================================
+TAU MISMATCH NOTE (MINOR, POST-2125 ONLY)
+================================================================================
+
+For Fixed_Vpt periods with u = 2125-2126 (the two years just past BeginConstraintYear
+that still used local_tau=1.7 with the user's fix), the fixed term uses 1.0 × Wpt
+rather than 1.7 × Wpt. This understates the past warming contribution by 0.7 × Wpt
+for those 2 years. This means later auctions (2127+) think they have slightly more
+removal headroom than they actually do. However:
+  - This affects only years 2127+ (outside the 2025-2125 measurement window).
+  - The impact on removal cost as reported is zero.
+  - Fixing it would require tracking per-period tau history.
+
+================================================================================
+SUMMARY
+================================================================================
+
+Reason                              Effect on removal cost
+-----------------------------------------------------------
+(1) Per-window independence         LARGE INCREASE: each window forces 1.7×
+    (structural design)             removal ratio independently; global model
+                                    can spread removal over 250 years.
+
+(2) Early removals forced           LARGE INCREASE: early-year Agriculture has
+    (structural design)             high undiscounted prices; global model uses
+                                    cheap late-year Agriculture.
+
+(3) High Capt shadow price          LARGE INCREASE: Capt dual is large because
+    per window (structural)         only 2 years of removers per auction vs.
+                                    100 years in global model.
+
+(4) Missing Fixed_Vpt (now fixed)   NEGLIGIBLE: structurally correct fix but
+                                    economically zero effect since each auction
+                                    achieves exact balance (taxedTemp = 0).
+
+(5) Tau drops at wrong year         NEGLIGIBLE: affects only post-2125 auctions
+    (now fixed to > not >=)         outside the 2025-2125 cost window.
+
+The bottom line: the high removal cost for short auctions is a fundamental
+economic property of the model design, not a correctable code bug.

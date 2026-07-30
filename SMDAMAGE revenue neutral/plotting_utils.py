@@ -294,7 +294,7 @@ def Summary_of_estimates_to_end_global_warming(db_path, scenario_id_1, scenario_
 	scenario_id_1..5 correspond to columns: Estimates 3, 1, 4, 2, 5.
 	"""
 	begin_year = 2025.0
-	end_year = 2125.0
+	end_year = 2125.0 # calculate costs only through end_year, not through the full constraint horizon.
 
 	# Order presented in the paper.
 	columns = [("Estimate 3, weak contracts", "SMDAMAGE_1"), ("Estimate 1, 3rd party pays", "SMDAMAGE_0"), ("Estimate 4, short auctions", "SMDAMAGE_2"), ("Estimate 2, fixed tau", "SMDAMAGE_1"), ("Estimate 5, dynamic tau", "SMDAMAGE_1"),]
@@ -317,6 +317,8 @@ def Summary_of_estimates_to_end_global_warming(db_path, scenario_id_1, scenario_
 
 	conn = sqlite3.connect(db_path)
 	cursor = conn.cursor()
+	missing = [sid for sid in scenario_ids if _load_scalar(cursor, "SELECT id FROM scenarios WHERE id = ?", (sid,)) is None]
+	if missing: raise ValueError(f"Scenario IDs not found in {db_path}: {missing}")
 	third_party_pays = []
 	average_emitter_price = []
 	average_remover_price = []

@@ -184,12 +184,12 @@ def save_fitted_wpt(db_path, calibration_scenario_id, wpt_dict):
 	conn.commit()
 	conn.close()
 
-def get_fitted_wpt(db_path, calibration_scenario_id=None):
-	"""Return {(pollutant, float(t)): value} from the specified calibration, or the most recently saved one."""
+def get_fitted_wpt(db_path, calibration_scenario_id):
+	"""Return {(pollutant, float(t)): value} from the specified calibration."""
+	if calibration_scenario_id is None: raise ValueError("calibration_scenario_id is required for get_fitted_wpt")
 	conn = sqlite3.connect(db_path)
 	cursor = conn.cursor()
-	if calibration_scenario_id is not None: cursor.execute("SELECT pollutant, t, value FROM fitted_wpt WHERE calibration_scenario_id = ?", (calibration_scenario_id,))
-	else: cursor.execute("SELECT pollutant, t, value FROM fitted_wpt WHERE calibration_scenario_id = (SELECT MAX(calibration_scenario_id) FROM fitted_wpt)")
+	cursor.execute("SELECT pollutant, t, value FROM fitted_wpt WHERE calibration_scenario_id = ?", (calibration_scenario_id,))
 	rows = cursor.fetchall()
 	conn.close()
 	return {(pollutant, float(t)): value for pollutant, t, value in rows}
