@@ -12,8 +12,9 @@ import hector_interface # Hector pulse generation functions.
 import database_interface # for dynamic bidder and tree data.
 
 # Directories and file names.
-def getOutputDirectory(): 			return "./SMDAMAGE revenue neutral/Output/" # Must exist
-def getSolutionsDBPath():           return "./SMDAMAGE revenue neutral/Output/smdamage_solutions.db"
+_HERE = os.path.dirname(os.path.abspath(__file__))
+def getOutputDirectory():           return os.path.join(_HERE, "Output", "")
+def getSolutionsDBPath():           return os.path.join(_HERE, "Output", "smdamage_solutions.db")
 def getTemperatureOutputPath():     return os.path.join(getOutputDirectory(), "temperature_output.csv")
 
 WRITE_LEGACY_FILES = True

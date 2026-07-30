@@ -28,6 +28,9 @@ from math import log10, floor
 import defaults_and_utilities
 import database_interface
 
+HECTOR_DIR = "C:/Users/johnr/Documents/Work documents/2 Research/Global warming/Numerical Simulation/hector-2.0.1-Windows/"
+# HECTOR_DIR = "D:/Work documents/2 Research/Global warming/Numerical Simulation/hector-2.0.1-Windows/"
+
 # This function is a property of your climate simulator, which must synchronize with the auction.
 # So if you want the auction to run every 6 months, you will have to simulate the resulting emissions and removal schedule on a 6 month basis.
 def getPeriodsPerYear():
@@ -77,8 +80,7 @@ def readTemperatureOutput(outputfilename): # Read the temperature output from He
 # Then you've got it and don't need to run it again.
 def get_Pulses_from_Hector():
 	pulse_year = 2005 # Chosen because it's before the phaseout of some refrigerants.
-	pathname = "D:/Work documents/2 Research/Global warming/Numerical Simulation/hector-2.0.1-Windows/"
-	# pathname = "C:/Users/johnr/Documents/Work documents/2 Research/Global warming/Numerical Simulation/hector-2.0.1-Windows/"
+	pathname = HECTOR_DIR
 	os.chdir(pathname)
 
 	file_list = {"Hector_ini": "input/hector_rcp26_pulsed.ini", # You should make this in advance. In section [core], replace "run_name=rcp26" with "run_name=rcp26_emissions_pulsed". Replace text "RCP26_emissions.csv" with "RCP26_emissions_pulsed.csv".
@@ -138,7 +140,7 @@ def get_Pulses_from_Hector():
 # Reads the Hector input file RCP_emissions, returns a dictionary RCP_emissions [year, emissionsType] = emissionsValue.
 # Called from convert_SMDAMAGE_solution_to_Hector_input().
 def getHectorEmissionsDictionary(RCP26_emissions_file): # e.g., "RCP26_emissions.csv"
-	with open ("../../hector-2.0.1-Windows/input/emissions/" + RCP26_emissions_file) as Hector_input_file:
+	with open (HECTOR_DIR + "input/emissions/" + RCP26_emissions_file) as Hector_input_file:
 		lines = [line.split(',') for line in Hector_input_file]
 	RCP26_emissions = {}
 	header = lines[3]
@@ -224,7 +226,7 @@ def write_SMDAMAGE_solution_to_Hector_input (scenario, SMDAMAGE_to_Hector_dict):
 	pollutantSet = pollutantSet.union([key[1] for key in SMDAMAGE_to_Hector_dict.keys()])
 
 	# Write the SMDAMAGE solution dictionary to Hector input csv.
-	with open (f"../../hector-2.0.1-Windows/input/emissions/" + defaults_and_utilities.experimentTag_to_file_name(scenario) + ".csv", 'w') as outputfile:
+	with open (HECTOR_DIR + "input/emissions/" + defaults_and_utilities.experimentTag_to_file_name(scenario) + ".csv", 'w') as outputfile:
 		header = "Year," + ','.join(pollutantSet)
 		outputfile.write(header + "\n")
 		for year in years:
@@ -236,8 +238,7 @@ def write_SMDAMAGE_solution_to_Hector_input (scenario, SMDAMAGE_to_Hector_dict):
 def run_Hector_with_SMDAMAGE_solution(scenario): # Goal is to get the Hector temperature trajectory.
 	write_SMDAMAGE_solution_to_Hector_input(scenario, convert_SMDAMAGE_solution_to_Hector_input(scenario)) # 2. Convert SMDAMAGE output to Hector input.
 	original_directory = os.getcwd()
-	hector_directory = "C:/Users/johnr/Documents/Work documents/2 Research/Global warming/Numerical Simulation/hector-2.0.1-Windows/"
-	# hector_directory = "D:/Work documents/2 Research/Global warming/Numerical Simulation/hector-2.0.1-Windows/"
+	hector_directory = HECTOR_DIR
 	os.chdir(hector_directory)
 
 	# Create Hector ini file.
@@ -264,7 +265,7 @@ def run_Hector_with_SMDAMAGE_solution(scenario): # Goal is to get the Hector tem
 	return
 
 def get_Hector_temperature(scenario):
-	hector_output_file_name = "../../hector-2.0.1-Windows/output/outputstream_" + defaults_and_utilities.experimentTag_to_file_name(scenario) + ".csv"
+	hector_output_file_name = HECTOR_DIR + "output/outputstream_" + defaults_and_utilities.experimentTag_to_file_name(scenario) + ".csv"
 	with open (hector_output_file_name) as hector_output_file: lines = [line.split(',') for line in hector_output_file]
 
 	temperature = {}
