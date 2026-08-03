@@ -21,70 +21,6 @@ Confirmed from smdamage_solutions.db:
     → astronomical garbage values, clear solver mis-parse.
 
 ============================================================================================
-FINDING 1 (PRIMARY): WRONG SOLVER — PULP_CBC_CMD('HiGHS', msg=0)
-============================================================================================
-
-Line 634 of SMDAMAGE revenue neutral.py:
-  solve_status = LpStatus[SMDAMAGE.solve(PULP_CBC_CMD('HiGHS', msg=0))]
-
-The first positional argument to PULP_CBC_CMD is `path` — the filesystem path to the CBC
-binary. Passing the string 'HiGHS' causes PuLP to attempt to run an executable called
-'HiGHS' with CBC-style command-line arguments. If HiGHS is installed on the system PATH,
-it may actually run but produce output in a format that PuLP's CBC output parser cannot
-read correctly. PuLP would then populate variable values with zeroes or prior-iteration
-garbage, and the computed net_revenue (which multiplies variable values by dual prices)
-would be nonsensical.
-
-Evidence from DB:
-  - Scenarios 21, 25, 26 show net_revenue of –$738 trillion to –$87 quadrillion.
-  - Their objective values (50,071 B and 153–167 thousand B) are inconsistent with each
-    other and with correctly solved runs (all clustering near 160–180 thousand B).
-  - The user's reported "$25.41 trillion" is almost certainly net_revenue or a misread
-    objective from one of these broken solves.
-
-Correct invocation (as in Solve_SMDAMAGE):
-  solve_status = LpStatus[SMDAMAGE.solve(PULP_CBC_CMD(msg=0, options=['-threads', '8']))]
-
-This is the #1 cause. Fix this first; the structural differences below are secondary.
-
-============================================================================================
-FINDING 2: MISSING 50 BID YEARS (2225–2274)
-============================================================================================
-
-With YEARS_IN_AUCTION=200 and loop `for startyear in range(2025, 2026)`:
-  BidPeriods = [2025.0 … 2224.0]  (200 years)
-  AllBidPeriods = getBidPeriods() = [2025.0 … 2274.0]  (250 years)
-  Missing: 2225–2274  (50 years, 20% of all bid years)
-
-vpt and qapt in short_auctions only cover years 2025–2224. Years 2225–2274 have no
-decision variables at all. In Solve_SMDAMAGE, vpt covers all 250 bid years.
-
-Impact on objective:
-  Emitter payments and removal costs for 50 years are absent. Since the auction is net-
-  revenue-positive (emitters pay more than removers cost), omitting 50 years reduces the
-  total. Direction: short_auctions objective LOWER.
-
-Impact on temperature constraints:
-  For constraint periods t ≥ 2225, no removal variables exist to compensate for post-2224
-  warming. Whatever warming remains after year 2224 (from long-lived GHGs) cannot be
-  offset. The model must compensate by mandating more aggressive removal in 2025–2224
-  to meet constraints at t = 2225–2320. Direction: constraint is TIGHTER → more costly
-  removal → objective LOWER.
-
-Comparison of the Temp_t constraint by period:
-  t ≤ 2224:  both models sum over the same u ≤ t (within their respective vpt coverage).
-             Identical.
-  2224 < t ≤ 2274:  Solve_SMDAMAGE can use u up to t (e.g., u=2250 for t=2250).
-             Short_auctions cannot use u > 2224.
-  t > 2274:  Both are limited to u ≤ 2274 by AllBidPeriods; identical at that point
-             (short_auctions was further limited to u ≤ 2224).
-
-Fix: extend the loop to cover all bid years, e.g.:
-  for startyear in range(int(getStartYear()), int(max(AllBidPeriods)) + 1, YEARS_IN_AUCTION):
-With YEARS_IN_AUCTION=200 that gives [2025, 2225]; the second auction would pick up
-the remaining 50 years in BidPeriods and cover them.
-
-============================================================================================
 FINDING 3: TAU APPLIED UNIFORMLY ACROSS ALL BID YEARS VS SPLIT AT BeginConstraintYear
 ============================================================================================
 
@@ -111,66 +47,6 @@ This is in the OPPOSITE direction from the observed result (short_auctions shows
 value). Therefore, finding 2 + finding 3 alone would produce short_auctions ≤ run_SMDAMAGE.
 The ONLY way short_auctions can show a wildly higher objective is Finding 1 (wrong solver).
 
-Quantitative rough estimate:
-  Scenario 27 (short_auctions, appears correct): obj = $178,854 B
-  Scenario 11 (run_SMDAMAGE):                   obj = $179,713 B
-  Difference: –$859 B (short_auctions is 0.5% lower than run_SMDAMAGE)
-  This small gap is consistent with the 50 missing years + stricter tau offsetting each other.
-  Note: scenario 27 likely used a different YEARS_IN_AUCTION or loop range that happened to
-  include more bid years; without knowing its exact parameters the comparison is approximate.
-
-============================================================================================
-FINDING 4: FIXED PERIODS TAX USES scenario.tau NOT local_tau (MINOR FOR SINGLE-AUCTION CASE)
-============================================================================================
-
-In the taxed temperature constraint for auction k, fixed-period terms use scenario.tau:
-
-  + sum(scenario.tau * W * Fixed_Vpt  for emitters in FixedPeriods with u ≤ BeginConstraintYear)
-  + sum(1.0         * W * Fixed_Vpt  for emitters in FixedPeriods with u > BeginConstraintYear)
-  + sum(1.0         * W * Fixed_Vpt  for removers in FixedPeriods)
-
-For the first auction (FixedPeriods=[], single-auction case with YEARS_IN_AUCTION=200),
-these terms are all zero and there is no impact. But for multi-auction runs with 51-year
-windows, if local_tau is adjusted dynamically between auctions, prior-period emissions are
-re-weighted using scenario.tau (a constant), while current-period emissions use local_tau.
-This is a deliberate design choice to make future auctions account for accumulated warming
-from past decisions. No bug here, but worth documenting.
-
-============================================================================================
-FINDING 5: NO COLUMN GENERATION IN SHORT_AUCTIONS
-============================================================================================
-
-Solve_SMDAMAGE uses a column generation loop: it starts with a restricted set of bid steps
-(from the solutions database) and adds columns with positive reduced cost until no more can
-improve the objective. Short_auctions builds the full LP (all bid steps) from scratch on
-every call.
-
-With correct solver both should reach the same optimal. No impact on solution value.
-Impact on solve time: short_auctions is much slower for large YEARS_IN_AUCTION because the
-LP has ~250 bid years × bidders × bid steps columns all at once.
-
-============================================================================================
-SUMMARY TABLE
-============================================================================================
-
-  Finding | Description                              | Direction of impact on obj | Scale
-  --------|------------------------------------------|-----------------------------|------
-  1       | PULP_CBC_CMD('HiGHS') wrong solver       | Unpredictable / garbage     | PRIMARY
-  2       | 50 bid years 2225-2274 absent             | Short_auctions LOWER        | moderate
-  3       | τ=1.7 for years 2125-2224 (should be 1.0)| Short_auctions LOWER        | moderate
-  4       | Fixed-period tau uses scenario.tau        | No impact for 1-auction case| none
-  5       | No column generation                      | Same optimal solution        | none
-
-============================================================================================
-RECOMMENDED FIXES
-============================================================================================
-
-(a) Fix the solver (Finding 1):
-    Change line 634 from:
-      PULP_CBC_CMD('HiGHS', msg=0)
-    to:
-      PULP_CBC_CMD(msg=0, options=['-threads', '8'])
-
 (b) Fix the loop range (Finding 2):
     Change line 575 from:
       for startyear in range(2025, 2026):
@@ -184,10 +60,3 @@ RECOMMENDED FIXES
       local_tau * sum(W*v  for emitters with u in BidPeriods and u < BeginConstraintYear)
     + 1.0       * sum(W*v  for emitters with u in BidPeriods and u >= BeginConstraintYear)
     + 1.0       * sum(W*v  for removers in BidPeriods)
-
-After fixing (a), the model should solve correctly. After fixing (b) and (c), the 200-year
-single-auction result should be within a fraction of a percent of run_SMDAMAGE.
-
-============================================================================================
-END OF AUDIT
-============================================================================================

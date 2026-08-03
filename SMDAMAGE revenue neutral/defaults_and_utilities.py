@@ -7,7 +7,6 @@
 import time # for timing the run.
 import os # for file system operations
 import sqlite3
-import csv
 import hector_interface # Hector pulse generation functions.
 import database_interface # for dynamic bidder and tree data.
 
@@ -15,11 +14,6 @@ import database_interface # for dynamic bidder and tree data.
 _HERE = os.path.dirname(os.path.abspath(__file__))
 def getOutputDirectory():           return os.path.join(_HERE, "Output", "")
 def getSolutionsDBPath():           return os.path.join(_HERE, "Output", "smdamage_solutions.db")
-def getTemperatureOutputPath():     return os.path.join(getOutputDirectory(), "temperature_output.csv")
-
-WRITE_LEGACY_FILES = True
-def write_legacy_files(): return WRITE_LEGACY_FILES
-
 def ensure_solutions_db():
 	import sqlite3
 	db_path = getSolutionsDBPath()
@@ -31,21 +25,12 @@ def ensure_solutions_db():
 		CREATE TABLE IF NOT EXISTS variables (id INTEGER PRIMARY KEY AUTOINCREMENT, scenario_id INTEGER, bidder TEXT, year REAL, bid_step INTEGER, value REAL,
 			FOREIGN KEY (scenario_id) REFERENCES scenarios(id));
 		CREATE TABLE IF NOT EXISTS constraint_duals (id INTEGER PRIMARY KEY AUTOINCREMENT, scenario_id INTEGER, constraint_name TEXT, pi REAL, FOREIGN KEY (scenario_id) REFERENCES scenarios(id));
-		CREATE TABLE IF NOT EXISTS temperature_series (id INTEGER PRIMARY KEY AUTOINCREMENT, scenario_id INTEGER NOT NULL, source TEXT NOT NULL,
-			year REAL NOT NULL, value REAL, FOREIGN KEY (scenario_id) REFERENCES scenarios(id));
 		CREATE UNIQUE INDEX IF NOT EXISTS uq_variables_record_key ON variables(scenario_id, bidder, year, bid_step);
 		CREATE UNIQUE INDEX IF NOT EXISTS uq_constraint_duals_record_key ON constraint_duals(scenario_id, constraint_name);
-		CREATE UNIQUE INDEX IF NOT EXISTS uq_temperature_series_record_key ON temperature_series(scenario_id, source, year);
-		CREATE INDEX IF NOT EXISTS idx_temp_series_scenario ON temperature_series(scenario_id);
-		CREATE INDEX IF NOT EXISTS idx_temp_series_source ON temperature_series(scenario_id, source);
 		CREATE TABLE IF NOT EXISTS fitted_wpt (id INTEGER PRIMARY KEY AUTOINCREMENT, calibration_scenario_id INTEGER NOT NULL, pollutant TEXT NOT NULL,
 			t INTEGER NOT NULL, value REAL NOT NULL, FOREIGN KEY (calibration_scenario_id) REFERENCES scenarios(id));
 		CREATE UNIQUE INDEX IF NOT EXISTS uq_fitted_wpt_record_key ON fitted_wpt(calibration_scenario_id, pollutant, t);
 		CREATE INDEX IF NOT EXISTS idx_fitted_wpt_scenario ON fitted_wpt(calibration_scenario_id, pollutant);
-		CREATE TABLE IF NOT EXISTS scenario_artifacts (id INTEGER PRIMARY KEY AUTOINCREMENT, scenario_id INTEGER NOT NULL,
-			artifact_type TEXT NOT NULL, artifact_path TEXT, header_text TEXT, created_at TEXT, content_hash TEXT,
-			FOREIGN KEY (scenario_id) REFERENCES scenarios(id));
-		CREATE INDEX IF NOT EXISTS idx_scenario_artifacts_scenario ON scenario_artifacts(scenario_id, artifact_type);
 		CREATE TABLE IF NOT EXISTS scenario_bidder_year (id INTEGER PRIMARY KEY AUTOINCREMENT, scenario_id INTEGER NOT NULL,
 			bidder TEXT NOT NULL, year REAL NOT NULL, quantity_value REAL, pct_max_bid REAL, dual_price REAL,
 			unit_label TEXT, value_source TEXT NOT NULL, FOREIGN KEY (scenario_id) REFERENCES scenarios(id));
@@ -81,30 +66,6 @@ def ensure_solutions_db():
 	conn.commit()
 	conn.close()
 
-def rebuild_temperature_output_csv_from_db():
-	"""Legacy compatibility: rewrite temperature_output.csv from temperature_series DB content."""
-	if not write_legacy_files(): return
-	db_path = getSolutionsDBPath()
-	conn = sqlite3.connect(db_path)
-	cursor = conn.cursor()
-	cursor.execute("""SELECT ts.source, s.name, ts.year, ts.value
-		FROM temperature_series ts JOIN scenarios s ON s.id = ts.scenario_id
-		ORDER BY s.id, ts.source, ts.year""")
-	rows = cursor.fetchall()
-	conn.close()
-
-	series = {}
-	all_years = set()
-	for source, name, year, value in rows:
-		series.setdefault((source, name), {})[year] = value
-		all_years.add(year)
-	years = sorted(all_years)
-	with open(getTemperatureOutputPath(), 'w', newline='') as f:
-		writer = csv.writer(f)
-		writer.writerow(['Source', 'Experiment'] + [str(y) for y in years])
-		for (source, name), year_to_value in series.items(): writer.writerow([source, name] + [year_to_value.get(y, '') for y in years])
-
-def SMDAMAGE_output_file_name(scenario): return getOutputDirectory() + "SMDAMAGE_soln_" + experimentTag_to_file_name(scenario) + ".csv"
 def Hector_output_file_name(scenario): return getOutputDirectory() + "Hector_output_" + experimentTag_to_file_name(scenario) + ".csv"
 
 # These are the market participants. Emitters face tax tau. Removers do not.
@@ -152,8 +113,7 @@ class Scenario(object):
 # your_sample_scenario = Scenario(comment = "Contracts", discount_rate = 0.03, initial_temperature = 971.24975, is_revenue_neutral = True, tau = 2.6, is_removal_luc = True, use_updated_Wpt = False, calibration_scenario_id = None)
 
 def append_temperatures_to_db(scenario_id, source, year_to_value):
-	database_interface.save_temperature_series(getSolutionsDBPath(), scenario_id, source, year_to_value)
-	rebuild_temperature_output_csv_from_db()
+	database_interface.save_scenario_series(getSolutionsDBPath(), scenario_id, source, year_to_value)
 
 def delete_scenario_solution(scenario_id_list):
 	"""Delete all solution rows for each scenario id in scenario_id_list."""
@@ -162,17 +122,14 @@ def delete_scenario_solution(scenario_id_list):
 	conn = sqlite3.connect(db_path)
 	cursor = conn.cursor()
 	for scenario_id in scenario_id_list:
-		cursor.execute("DELETE FROM temperature_series WHERE scenario_id = ?", (scenario_id,))
 		cursor.execute("DELETE FROM fitted_wpt WHERE calibration_scenario_id = ?", (scenario_id,))
 		cursor.execute("DELETE FROM scenario_series WHERE scenario_id = ?", (scenario_id,))
 		cursor.execute("DELETE FROM scenario_bidder_year WHERE scenario_id = ?", (scenario_id,))
-		cursor.execute("DELETE FROM scenario_artifacts WHERE scenario_id = ?", (scenario_id,))
 		cursor.execute("DELETE FROM variables WHERE scenario_id = ?", (scenario_id,))
 		cursor.execute("DELETE FROM constraint_duals WHERE scenario_id = ?", (scenario_id,))
 		cursor.execute("DELETE FROM scenarios WHERE id = ?", (scenario_id,))
 	conn.commit()
 	conn.close()
-	rebuild_temperature_output_csv_from_db()
 
 def experimentTag_to_file_name(scenario):
 	tag = getExperimentTag(scenario)

@@ -142,32 +142,21 @@ def getPulse(): # Retrieves the marginal change in temperature in each year afte
 # These functions use a separate DB path passed in, to avoid coupling to defaults_and_utilities.
 # =============================================================================================
 
-def save_temperature_series(db_path, scenario_id, source, year_to_value):
-	"""Insert rows into temperature_series for one (scenario_id, source) pair."""
-	conn = sqlite3.connect(db_path)
-	cursor = conn.cursor()
-	cursor.executemany(
-		"""INSERT INTO temperature_series (scenario_id, source, year, value) VALUES (?,?,?,?)
-		ON CONFLICT(scenario_id, source, year) DO UPDATE SET value=excluded.value""",
-		[(scenario_id, source, float(year), value) for year, value in year_to_value.items()])
-	conn.commit()
-	conn.close()
-
 def get_temperature_series_by_scenario_id(db_path, scenario_id, source):
-	"""Return {year: value} for one scenario id and source label."""
+	"""Return {year: value} for one scenario id and series name."""
 	conn = sqlite3.connect(db_path)
 	cursor = conn.cursor()
-	cursor.execute("SELECT year, value FROM temperature_series WHERE scenario_id = ? AND source = ? ORDER BY year", (scenario_id, source))
+	cursor.execute("SELECT year, value FROM scenario_series WHERE scenario_id = ? AND series_name = ? ORDER BY year", (scenario_id, source))
 	rows = cursor.fetchall()
 	conn.close()
 	return {year: value for year, value in rows}
 
 def get_temperature_series(db_path, scenario_name, source):
-	"""Return {year: value} for the given scenario name and source label."""
+	"""Return {year: value} for the given scenario name and series name."""
 	conn = sqlite3.connect(db_path)
 	cursor = conn.cursor()
 	cursor.execute(
-		"SELECT ts.year, ts.value FROM temperature_series ts JOIN scenarios s ON s.id = ts.scenario_id WHERE s.name = ? AND ts.source = ? ORDER BY ts.year",
+		"SELECT ss.year, ss.value FROM scenario_series ss JOIN scenarios s ON s.id = ss.scenario_id WHERE s.name = ? AND ss.series_name = ? ORDER BY ss.year",
 		(scenario_name, source))
 	rows = cursor.fetchall()
 	conn.close()
@@ -327,3 +316,22 @@ def get_vpt_dual_series_by_scenario_id(db_path, scenario_id, bidder='Carbon'):
 		series[float(inner[last_comma + 1:])] = pi
 	return series
 
+def get_previous_acceptedbidsteps(db_path, scenario_id=None):
+	"""Return (previous_acceptedbidsteps, binding_constraints, vpt_duals) from smdamage_solutions.db."""
+	conn = sqlite3.connect(db_path)
+	cursor = conn.cursor()
+	if scenario_id is None: cursor.execute("SELECT bid_step, bidder, year FROM variables")
+	else: cursor.execute("SELECT bid_step, bidder, year FROM variables WHERE scenario_id=?", (scenario_id,))
+	previous_acceptedbidsteps = {(int(r[0]), r[1], float(r[2])) for r in cursor.fetchall()}
+	if scenario_id is None: cursor.execute("SELECT DISTINCT constraint_name FROM constraint_duals WHERE constraint_name LIKE 'Forestry_Land%'")
+	else: cursor.execute("SELECT DISTINCT constraint_name FROM constraint_duals WHERE scenario_id=? AND constraint_name LIKE 'Forestry_Land%'", (scenario_id,))
+	binding_constraints = set(r[0] for r in cursor.fetchall())
+	if scenario_id is None: cursor.execute("SELECT constraint_name, MAX(pi) FROM constraint_duals WHERE constraint_name LIKE 'Vpt(%' GROUP BY constraint_name")
+	else: cursor.execute("SELECT constraint_name, MAX(pi) FROM constraint_duals WHERE scenario_id=? AND constraint_name LIKE 'Vpt(%' GROUP BY constraint_name", (scenario_id,))
+	vpt_duals = {}
+	for c_name, pi in cursor.fetchall():
+		inner = c_name[4:-1]  # "Vpt(Agriculture,2025.0)" -> "Agriculture,2025.0"
+		last_comma = inner.rfind(',')
+		vpt_duals[(inner[:last_comma], float(inner[last_comma + 1:]))] = pi
+	conn.close()
+	return previous_acceptedbidsteps, binding_constraints, vpt_duals

@@ -3,27 +3,13 @@
 # we can calibrate the Wpt values in SMDAMAGE.
 # John F Raffensperger. 2022-07-27, 2022-09-10, 2025-01-05.
 
-import importlib.util
-import matplotlib.pyplot as mplot
 import os
 from pulp import *
-import sys
 
 import hector_interface
 import plotting_utils
 import defaults_and_utilities
 import database_interface
-
-# Import the main module with spaces in filename
-import os
-current_dir = os.path.dirname(os.path.abspath(__file__))
-main_file_path = os.path.join(current_dir, "SMDAMAGE revenue neutral.py")
-spec = importlib.util.spec_from_file_location("smdamage_main", main_file_path)
-smdamage_main = importlib.util.module_from_spec(spec)
-sys.modules["smdamage_main"] = smdamage_main
-spec.loader.exec_module(smdamage_main)
-
-# Plotting functions moved to plotting_utils.py
 
 def run_SMDAMAGE_fit_W(scenario):
 	# 	If scenario.is_removal_luc,

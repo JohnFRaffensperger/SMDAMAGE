@@ -79,7 +79,7 @@ def readTemperatureOutput(outputfilename): # Read the temperature output from He
 # Move Pulses_by_chemical.txt from the Hector directory to your /data/ directory.
 # Then you've got it and don't need to run it again.
 def get_Pulses_from_Hector():
-	pulse_year = 2005 # Chosen because it's before the phaseout of some refrigerants.
+	pulse_year = 2005 # Chosen because 2005 is before the phaseout of some refrigerants, so the code gets a more accurate pulse.
 	pathname = HECTOR_DIR
 	os.chdir(pathname)
 
