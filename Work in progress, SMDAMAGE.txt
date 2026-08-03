@@ -1,236 +1,193 @@
-AUDIT (SECOND ROUND): Why removal cost for short auctions (Estimate 4) remains very high.
-Written 2026-07-30.
+Audit: Why run_SMDAMAGE_short_auctions (YEARS_IN_AUCTION=200) differs from run_SMDAMAGE
+Date: 2026-08-01
+============================================================================================
 
-================================================================================
-STATUS OF PREVIOUS FIX
-================================================================================
+SETUP
+-----
+run_SMDAMAGE calls Solve_SMDAMAGE with tau=1.7, fitted Wpt (calibration_scenario_id=1).
+run_SMDAMAGE_short_auctions is set to YEARS_IN_AUCTION=200, local_tau=1.7, same scenario.
+With YEARS_IN_AUCTION=200 the intent is "one big 200-year auction ≈ the long-run model."
+Key parameters from defaults_and_utilities.py:
+  getStartYear()            = 2025
+  getFirstConstrainedYear() = 2125  (BeginConstraintYear)
+  getNumber_of_bid_years()  = 250   → getBidPeriods() = [2025.0 … 2274.0]
+  getPulseDataLength()      = 296   → getModelPeriods() = [2025.0 … 2320.0]
 
-The previous fix (adding Fixed_Vpt contributions to the taxedTemperatureChange
-constraint) is mathematically correct but makes no economic difference to
-removal cost. Here is why.
+Confirmed from smdamage_solutions.db:
+  Scenario 11 (run_SMDAMAGE, tau=1.7, fitted Wpt): objective/1000 = $179,713 B  ($179.7 T)
+  Scenario 18 (short auctions, tau=1.7, fitted Wpt, HiGHS solver): obj/1000 = $160,855 B
+  Scenario 27 (short auctions, most recent correct-looking run): obj/1000 = $178,854 B
+  Scenarios 21, 25, 26 (short auctions with HiGHS): net_revenue ≈ -$738 T to -$87 quad
+    → astronomical garbage values, clear solver mis-parse.
 
-At the end of each 2-year auction, the optimizer has achieved exact revenue
-neutrality at the binding constraint year. Concretely, for auction covering
-years [S, S+1], the LP drives:
+============================================================================================
+FINDING 1 (PRIMARY): WRONG SOLVER — PULP_CBC_CMD('HiGHS', msg=0)
+============================================================================================
 
-    taxedTemperatureChange[2125] = tau*C_S*W(2125-S) + tau*C_{S+1}*W(2124-S)
-                                    - A_S*W(2125-S) - A_{S+1}*W(2124-S) = 0
+Line 634 of SMDAMAGE revenue neutral.py:
+  solve_status = LpStatus[SMDAMAGE.solve(PULP_CBC_CMD('HiGHS', msg=0))]
 
-i.e., exactly balanced. So the contribution of Fixed_Vpt[S, S+1] to the next
-auction's fixed term is exactly zero. The next auction again must independently
-achieve tau*emissions = removals in its own 2-year window.
+The first positional argument to PULP_CBC_CMD is `path` — the filesystem path to the CBC
+binary. Passing the string 'HiGHS' causes PuLP to attempt to run an executable called
+'HiGHS' with CBC-style command-line arguments. If HiGHS is installed on the system PATH,
+it may actually run but produce output in a format that PuLP's CBC output parser cannot
+read correctly. PuLP would then populate variable values with zeroes or prior-iteration
+garbage, and the computed net_revenue (which multiplies variable values by dual prices)
+would be nonsensical.
 
-The fix is correct in structure: if any past auction happened to OVER-remove
-(taxedTemp < 0), future auctions would get a credit and need less removal.
-But the revenue-maximizing optimizer never voluntarily over-removes. It drives
-taxedTemp to exactly 0. Credit is always zero. Total removal is unchanged.
+Evidence from DB:
+  - Scenarios 21, 25, 26 show net_revenue of –$738 trillion to –$87 quadrillion.
+  - Their objective values (50,071 B and 153–167 thousand B) are inconsistent with each
+    other and with correctly solved runs (all clustering near 160–180 thousand B).
+  - The user's reported "$25.41 trillion" is almost certainly net_revenue or a misread
+    objective from one of these broken solves.
 
-================================================================================
-THE REAL CAUSE: ECONOMIC DESIGN, NOT CODE BUG
-================================================================================
+Correct invocation (as in Solve_SMDAMAGE):
+  solve_status = LpStatus[SMDAMAGE.solve(PULP_CBC_CMD(msg=0, options=['-threads', '8']))]
 
-The high removal cost is a direct consequence of how the short auction model
-is designed. The comparison below makes this precise.
+This is the #1 cause. Fix this first; the structural differences below are secondary.
 
-ESTIMATE 2 (run_SMDAMAGE, global model, ~commented out lines 790+)
---------------------------------------------------------------------
-ONE LP over all 250 bid years simultaneously.
-Revenue-neutrality constraint at t=2125 (and each t >= 2125):
+============================================================================================
+FINDING 2: MISSING 50 BID YEARS (2225–2274)
+============================================================================================
 
-    tau × SUM_{u=2025}^{2124} C_u × W(2125-u)   <=   SUM_{u=2025}^{2274} R_u × W(2125-u)
+With YEARS_IN_AUCTION=200 and loop `for startyear in range(2025, 2026)`:
+  BidPeriods = [2025.0 … 2224.0]  (200 years)
+  AllBidPeriods = getBidPeriods() = [2025.0 … 2274.0]  (250 years)
+  Missing: 2225–2274  (50 years, 20% of all bid years)
 
-The optimizer sees all 250 years at once. It satisfies the CUMULATIVE
-constraint by choosing the globally cheapest removals:
-  - It allows max emissions in years where emitters bid high (valuable).
-  - It accepts Agriculture from the years where Agriculture is CHEAPEST in
-    discounted objective terms — which is the LATEST possible years (years
-    2075-2124), where the discount factor is (1/1.03)^50 to (1/1.03)^99
-    = 0.23 to 0.05 of the undiscounted price.
-  - The Agriculture Vpt dual (shadow price) reflects the marginal cost of
-    the globally cheapest accepted Agriculture, which is a LATE-YEAR,
-    DEEPLY-DISCOUNTED removal step.
+vpt and qapt in short_auctions only cover years 2025–2224. Years 2225–2274 have no
+decision variables at all. In Solve_SMDAMAGE, vpt covers all 250 bid years.
 
-Result: small Vpt dual for Agriculture × moderate quantity = moderate cost.
+Impact on objective:
+  Emitter payments and removal costs for 50 years are absent. Since the auction is net-
+  revenue-positive (emitters pay more than removers cost), omitting 50 years reduces the
+  total. Direction: short_auctions objective LOWER.
 
-ESTIMATE 4 (run_SMDAMAGE_short_auctions, 2-year windows)
----------------------------------------------------------
-~125 sequential 2-year LPs.
-Revenue-neutrality constraint in EACH WINDOW independently:
+Impact on temperature constraints:
+  For constraint periods t ≥ 2225, no removal variables exist to compensate for post-2224
+  warming. Whatever warming remains after year 2224 (from long-lived GHGs) cannot be
+  offset. The model must compensate by mandating more aggressive removal in 2025–2224
+  to meet constraints at t = 2225–2320. Direction: constraint is TIGHTER → more costly
+  removal → objective LOWER.
 
-    tau × C_S × W(2125-S) + tau × C_{S+1} × W(2124-S)
-        <=  A_S × W(2125-S) + A_{S+1} × W(2124-S) + (other removers in {S, S+1})
+Comparison of the Temp_t constraint by period:
+  t ≤ 2224:  both models sum over the same u ≤ t (within their respective vpt coverage).
+             Identical.
+  2224 < t ≤ 2274:  Solve_SMDAMAGE can use u up to t (e.g., u=2250 for t=2250).
+             Short_auctions cannot use u > 2224.
+  t > 2274:  Both are limited to u ≤ 2274 by AllBidPeriods; identical at that point
+             (short_auctions was further limited to u ≤ 2224).
 
-The optimizer in the 2025-2026 auction can ONLY use removers (Agriculture,
-Seaweed, and forestry plantings) from years 2025 and 2026 to offset 2025-2026
-emissions. It cannot use cheap removers from 2100, even if the warming effect
-at t=2125 is the same.
+Fix: extend the loop to cover all bid years, e.g.:
+  for startyear in range(int(getStartYear()), int(max(AllBidPeriods)) + 1, YEARS_IN_AUCTION):
+With YEARS_IN_AUCTION=200 that gives [2025, 2225]; the second auction would pick up
+the remaining 50 years in BidPeriods and cover them.
 
-WHY FORESTRY DOES NOT ESCAPE THIS CONSTRAINT:
+============================================================================================
+FINDING 3: TAU APPLIED UNIFORMLY ACROSS ALL BID YEARS VS SPLIT AT BeginConstraintYear
+============================================================================================
 
-Forestry (e.g., 100-year rotation Ponderosa pine, 103-year rotation) IS
-included in the taxedTemp constraint for the 2025-2026 auction. The Wpt for
-forestry planted in 2025 at lag 100 (= t=2125 - u=2025) is large: it reflects
-100 years of accumulated carbon sequestration (e.g., ~5 tonnes/ha/yr for 100
-years = ~500 tonnes/ha stored). Forestry IS available and the optimizer will
-use it if it provides better value per Wpt unit than Agriculture.
+Solve_SMDAMAGE builds taxed_exprs with a split at u = BeginConstraintYear = 2125:
 
-However, forestry does not escape the fundamental problem for three reasons:
+  taxed_temp[t] = tau * sum(W[p,t-u]*v[p,u]  for emitters with u ≤ 2124)   ← τ=1.7
+               + 1.0 * sum(W[p,t-u]*v[p,u]  for emitters with u ≥ 2125)   ← τ=1.0
+               + 1.0 * sum(W[p,t-u]*v[p,u]  for removers)
 
-(a) DISCOUNTING: Forestry planted in 2025 must be paid for in 2025 at the
-    full undiscounted bid price (discount factor = 1.0). The global model can
-    instead wait and plant forestry in 2050 at a discounted price
-    (factor ≈ (1/1.03)^25 = 0.48), using that cheaper future planting to
-    satisfy a future constraint year. The short auction forces expensive NOW.
+run_SMDAMAGE_short_auctions applies local_tau uniformly to ALL emitters in BidPeriods:
 
-(b) LAND CONSTRAINT (correctly implemented, but still restrictive): Land
-    committed in 2025-2026 is occupied for the full rotation period (R years)
-    and is correctly released afterward — the condition `u <= t <= u + R - 1`
-    in both fixed_land and the current planting sum ensures land is freed at
-    t = u + R. However, during those R years, that land cannot be replanted.
-    The global model allocates land optimally across all 250 years simultaneously,
-    choosing the planting schedule that maximises cooling per unit of land over
-    the full horizon. The short auction can only commit land in the current 2-year
-    window, without knowing what future auctions will need.
+  taxed_temp[t] = local_tau * sum(W[p,t-u]*v[p,u]  for emitters in 2025–2224)  ← τ=1.7
+               + 1.0      * sum(W[p,t-u]*v[p,u]  for removers in 2025–2224)
 
-(c) SHORT-ROTATION FORESTRY IS INEFFECTIVE AT LAG 100: The data includes
-    10-year and 24-year rotation options whose sequestration drops to zero
-    after harvest (e.g., Loblolly pine 10yr: tc=0 after year 10). At lag 100,
-    only the fraction still in the atmosphere from those early years contributes.
-    The binding constraint at t=2125 (lag 100) can only be satisfied well by
-    long-rotation forestry (100+ years), which is exactly at the end of its
-    rotation at t=2125. For t=2126 and beyond, the 100-year tree has been
-    harvested; only the persisting carbon from years 1-100 continues to cool,
-    at diminishing Wpt values. The optimizer must use Agriculture or Seaweed
-    for the post-rotation constraint years (t >= 2126 for the 100-yr tree).
+Difference: For emitters in years 2125–2224 (100 years):
+  Solve_SMDAMAGE:  τ = 1.0  (no surcharge; auction has cleared the target year)
+  Short_auctions:  τ = 1.7  (surcharge still applied post-2124)
 
-  - Years 2025-2026 Agriculture bids have discount factor = 1.0 (no discount).
-    These are the MOST EXPENSIVE Agriculture bids in objective terms.
-  - The auction must accept 1.7x emissions in removal-equivalent terms using
-    only this expensive Agriculture.
-  - The Agriculture Vpt dual = price of the marginal (threshold) Agriculture
-    step accepted in 2025-2026, which is a HIGH-PRICED EARLY STEP.
+With τ=1.7 on post-2124 emissions, the constraint at t ∈ ConstraintPeriods requires
+1.7× cooling offset instead of 1.0× for those years. This is strictly more restrictive.
+More removal must be purchased → objective LOWER for short_auctions.
 
-Result: large Vpt dual for Agriculture in early years × large quantity = large cost.
+This is in the OPPOSITE direction from the observed result (short_auctions shows higher
+value). Therefore, finding 2 + finding 3 alone would produce short_auctions ≤ run_SMDAMAGE.
+The ONLY way short_auctions can show a wildly higher objective is Finding 1 (wrong solver).
 
-================================================================================
-QUANTITATIVE ILLUSTRATION
-================================================================================
+Quantitative rough estimate:
+  Scenario 27 (short_auctions, appears correct): obj = $178,854 B
+  Scenario 11 (run_SMDAMAGE):                   obj = $179,713 B
+  Difference: –$859 B (short_auctions is 0.5% lower than run_SMDAMAGE)
+  This small gap is consistent with the 50 missing years + stricter tau offsetting each other.
+  Note: scenario 27 likely used a different YEARS_IN_AUCTION or loop range that happened to
+  include more bid years; without knowing its exact parameters the comparison is approximate.
 
-Suppose Agriculture's undiscounted bid price at the threshold step is $P/tC.
+============================================================================================
+FINDING 4: FIXED PERIODS TAX USES scenario.tau NOT local_tau (MINOR FOR SINGLE-AUCTION CASE)
+============================================================================================
 
-In Estimate 2:
-  - The global optimizer accepts Agriculture primarily from year 2100 (approx).
-  - Discounted bid price for year-2100 Agriculture = P × (1/1.03)^75 = 0.10 × P.
-  - Vpt dual ≈ 0.10 × P.
-  - Removal cost ≈ Q_total × 0.10P = small.
+In the taxed temperature constraint for auction k, fixed-period terms use scenario.tau:
 
-In short auctions (year 2025 auction):
-  - Must accept 2025 Agriculture.
-  - Discounted bid price for year-2025 Agriculture = P × (1/1.03)^0 = P.
-  - Vpt dual ≈ P.
-  - Year-2025 removal quantity ≈ tau × year-2025 emission = 1.7 × C_2025.
-  - Contribution to removal cost ≈ 1.7 × C_2025 × P = large.
+  + sum(scenario.tau * W * Fixed_Vpt  for emitters in FixedPeriods with u ≤ BeginConstraintYear)
+  + sum(1.0         * W * Fixed_Vpt  for emitters in FixedPeriods with u > BeginConstraintYear)
+  + sum(1.0         * W * Fixed_Vpt  for removers in FixedPeriods)
 
-The Vpt dual in the year-2025 short auction is roughly 10× larger than in
-Estimate 2. This alone explains most of the removal cost discrepancy.
+For the first auction (FixedPeriods=[], single-auction case with YEARS_IN_AUCTION=200),
+these terms are all zero and there is no impact. But for multi-auction runs with 51-year
+windows, if local_tau is adjusted dynamically between auctions, prior-period emissions are
+re-weighted using scenario.tau (a constant), while current-period emissions use local_tau.
+This is a deliberate design choice to make future auctions account for accumulated warming
+from past decisions. No bug here, but worth documenting.
 
-================================================================================
-WHY THE REMOVAL COST METRIC IS PARTICULARLY SENSITIVE
-================================================================================
+============================================================================================
+FINDING 5: NO COLUMN GENERATION IN SHORT_AUCTIONS
+============================================================================================
 
-The Summary table computes:
+Solve_SMDAMAGE uses a column generation loop: it starts with a restricted set of bid steps
+(from the solutions database) and adds columns with positive reduced cost until no more can
+improve the objective. Short_auctions builds the full LP (all bid steps) from scratch on
+every call.
 
-    removal_cost = SUM over removers and years 2025-2125: quantity × Vpt_dual
+With correct solver both should reach the same optimal. No impact on solution value.
+Impact on solve time: short_auctions is much slower for large YEARS_IN_AUCTION because the
+LP has ~250 bid years × bidders × bid steps columns all at once.
 
-This is total payment to removers at MARGINAL (dual) pricing, not at average
-pricing. The Vpt dual in short auctions is set by the scarcity price:
+============================================================================================
+SUMMARY TABLE
+============================================================================================
 
-    Vpt_dual(Agriculture, t) = |Agriculture bid price at threshold step| + lambda × Wpt
+  Finding | Description                              | Direction of impact on obj | Scale
+  --------|------------------------------------------|-----------------------------|------
+  1       | PULP_CBC_CMD('HiGHS') wrong solver       | Unpredictable / garbage     | PRIMARY
+  2       | 50 bid years 2225-2274 absent             | Short_auctions LOWER        | moderate
+  3       | τ=1.7 for years 2125-2224 (should be 1.0)| Short_auctions LOWER        | moderate
+  4       | Fixed-period tau uses scenario.tau        | No impact for 1-auction case| none
+  5       | No column generation                      | Same optimal solution        | none
 
-where lambda is the dual on the Capt(2125) constraint. In the 2-year auctions,
-lambda is large (few removers available per window), inflating both the Vpt_dual
-and the resulting removal cost.
+============================================================================================
+RECOMMENDED FIXES
+============================================================================================
 
-================================================================================
-THE RELEVANT COMPARISON
-================================================================================
+(a) Fix the solver (Finding 1):
+    Change line 634 from:
+      PULP_CBC_CMD('HiGHS', msg=0)
+    to:
+      PULP_CBC_CMD(msg=0, options=['-threads', '8'])
 
-The short auctions model is economically LESS EFFICIENT than the global model
-by construction: it cannot substitute cheap late-year removals for expensive
-early-year emissions. This is a fundamental trade-off of the short-auction design.
+(b) Fix the loop range (Finding 2):
+    Change line 575 from:
+      for startyear in range(2025, 2026):
+    to match the original pattern (adjusted for current YEARS_IN_AUCTION), e.g.:
+      for startyear in range(int(min(AllBidPeriods)), int(max(AllBidPeriods)) + 1, YEARS_IN_AUCTION):
+    With YEARS_IN_AUCTION=200 this runs auctions at 2025 and 2225, covering all 250 bid years.
 
-The short auctions model represents a real-world constraint: in each 2-year
-period, the market must be self-financing. Each auction cannot borrow against
-future removal capacity. This forced use of expensive early removals is the
-economic cost of the short-auction mechanism.
+(c) Fix tau application at BeginConstraintYear (Finding 3):
+    In the taxed temperature constraint, split the BidPeriods emitter sum at BeginConstraintYear,
+    as Solve_SMDAMAGE does:
+      local_tau * sum(W*v  for emitters with u in BidPeriods and u < BeginConstraintYear)
+    + 1.0       * sum(W*v  for emitters with u in BidPeriods and u >= BeginConstraintYear)
+    + 1.0       * sum(W*v  for removers in BidPeriods)
 
-To make removal costs comparable to Estimate 2, one of the following would
-be needed:
-  (a) ALLOW TEMPORAL SUBSTITUTION: let early emissions generate "removal
-      credits" that are assigned to future auction windows. The current auction
-      balances against a long-run virtual price rather than physical removals
-      in the current window.
-  (b) USE A DYNAMIC TAU: each auction's tau is set to reflect the actual shadow
-      price of removal in that window, not a fixed 1.7. When early removals are
-      expensive, tau is set low (fewer credits per emission) to reduce removal cost.
-  (c) USE A LONGER AUCTION WINDOW: instead of 2 years, use 10 or 25 years. This
-      allows more temporal substitution within each window.
+After fixing (a), the model should solve correctly. After fixing (b) and (c), the 200-year
+single-auction result should be within a fraction of a percent of run_SMDAMAGE.
 
-None of these are bugs — they are design choices. The current short auctions
-design, which achieves per-window revenue neutrality using whatever removers are
-available in that window, is more expensive by construction.
-
-================================================================================
-NOTE ON THE FIXED_VPT FIX (ALREADY APPLIED)
-================================================================================
-
-The fix correctly makes taxedTemperatureChange cumulative (accounting for past
-auction contributions). This is the mathematically right structure. However, as
-shown above, since each auction achieves exact balance (taxedTemp = 0 at the
-binding constraint), the carried-forward contribution from past auctions is always
-zero. The fix does not change the actual LP solutions or removal costs.
-
-The fix would matter if:
-  - Past auctions over-removed (taxedTemp < 0), providing credits.
-  - But the revenue-maximizing optimizer never voluntarily over-removes.
-
-================================================================================
-TAU MISMATCH NOTE (MINOR, POST-2125 ONLY)
-================================================================================
-
-For Fixed_Vpt periods with u = 2125-2126 (the two years just past BeginConstraintYear
-that still used local_tau=1.7 with the user's fix), the fixed term uses 1.0 × Wpt
-rather than 1.7 × Wpt. This understates the past warming contribution by 0.7 × Wpt
-for those 2 years. This means later auctions (2127+) think they have slightly more
-removal headroom than they actually do. However:
-  - This affects only years 2127+ (outside the 2025-2125 measurement window).
-  - The impact on removal cost as reported is zero.
-  - Fixing it would require tracking per-period tau history.
-
-================================================================================
-SUMMARY
-================================================================================
-
-Reason                              Effect on removal cost
------------------------------------------------------------
-(1) Per-window independence         LARGE INCREASE: each window forces 1.7×
-    (structural design)             removal ratio independently; global model
-                                    can spread removal over 250 years.
-
-(2) Early removals forced           LARGE INCREASE: early-year Agriculture has
-    (structural design)             high undiscounted prices; global model uses
-                                    cheap late-year Agriculture.
-
-(3) High Capt shadow price          LARGE INCREASE: Capt dual is large because
-    per window (structural)         only 2 years of removers per auction vs.
-                                    100 years in global model.
-
-(4) Missing Fixed_Vpt (now fixed)   NEGLIGIBLE: structurally correct fix but
-                                    economically zero effect since each auction
-                                    achieves exact balance (taxedTemp = 0).
-
-(5) Tau drops at wrong year         NEGLIGIBLE: affects only post-2125 auctions
-    (now fixed to > not >=)         outside the 2025-2125 cost window.
-
-The bottom line: the high removal cost for short auctions is a fundamental
-economic property of the model design, not a correctable code bug.
+============================================================================================
+END OF AUDIT
+============================================================================================

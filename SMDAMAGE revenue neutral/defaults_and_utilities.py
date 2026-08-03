@@ -26,7 +26,8 @@ def ensure_solutions_db():
 	conn = sqlite3.connect(db_path)
 	cursor = conn.cursor()
 	cursor.executescript("""CREATE TABLE IF NOT EXISTS scenarios (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, discount_rate REAL, initial_temp REAL, tau REAL,
-			is_revenue_neutral INTEGER, is_removal_luc INTEGER, use_updated_Wpt INTEGER, solver_status TEXT, net_revenue REAL, objective_value REAL, solution_datetime TEXT);
+			is_revenue_neutral INTEGER, is_removal_luc INTEGER, use_updated_Wpt INTEGER, solver_status TEXT, net_revenue REAL, objective_value REAL, solution_datetime TEXT,
+			Avg_emitter_price_2025_2125 REAL, Avg_remover_price_2025_2125 REAL, Emissions_2025_2125 REAL, Removal_cost_2025_2125 REAL);
 		CREATE TABLE IF NOT EXISTS variables (id INTEGER PRIMARY KEY AUTOINCREMENT, scenario_id INTEGER, bidder TEXT, year REAL, bid_step INTEGER, value REAL,
 			FOREIGN KEY (scenario_id) REFERENCES scenarios(id));
 		CREATE TABLE IF NOT EXISTS constraint_duals (id INTEGER PRIMARY KEY AUTOINCREMENT, scenario_id INTEGER, constraint_name TEXT, pi REAL, FOREIGN KEY (scenario_id) REFERENCES scenarios(id));
@@ -59,9 +60,24 @@ def ensure_solutions_db():
 	except Exception: pass # Column already exists.
 	try: cursor.execute("ALTER TABLE scenarios ADD COLUMN land_rent REAL")
 	except Exception: pass # Column already exists.
+	try: cursor.execute("ALTER TABLE scenarios ADD COLUMN Avg_emitter_price_2025_2125 REAL")
+	except Exception: pass
+	try: cursor.execute("ALTER TABLE scenarios ADD COLUMN Avg_remover_price_2025_2125 REAL")
+	except Exception: pass
+	try: cursor.execute("ALTER TABLE scenarios ADD COLUMN Emissions_2025_2125 REAL")
+	except Exception: pass
+	try: cursor.execute("ALTER TABLE scenarios ADD COLUMN Removal_cost_2025_2125 REAL")
+	except Exception: pass
 	forestry_meta_mig = database_interface.get_forestry_contractdata()
 	total_area_mig = sum(meta['available_area_mhectares'] for meta in forestry_meta_mig.values())
 	cursor.execute("UPDATE scenarios SET land_rent = (SELECT ? * COALESCE(SUM(cd.pi), 0.0) FROM constraint_duals cd WHERE cd.scenario_id = scenarios.id AND cd.constraint_name LIKE 'Forestry_Land_%') WHERE land_rent IS NULL", (total_area_mig,))
+	cursor.execute("""UPDATE scenarios SET
+		Avg_emitter_price_2025_2125 = (SELECT AVG(dual_price) FROM scenario_bidder_year WHERE scenario_id=scenarios.id AND bidder='Carbon' AND year>=2025 AND year<=2125),
+		Avg_remover_price_2025_2125 = (SELECT AVG(dual_price) FROM scenario_bidder_year WHERE scenario_id=scenarios.id AND bidder='Agriculture' AND year>=2025 AND year<=2125),
+		Emissions_2025_2125 = (SELECT SUM(quantity_value)/1000.0 FROM scenario_bidder_year WHERE scenario_id=scenarios.id AND bidder='Carbon' AND year>=2025 AND year<=2125),
+		Removal_cost_2025_2125 = (SELECT COALESCE(SUM(quantity_value*dual_price),0.0)/1000000.0 FROM scenario_bidder_year WHERE scenario_id=scenarios.id
+			AND bidder NOT IN ('C2F6','CF4','CH4','Carbon','HFC125','HFC134a','HFC143a','N2O','SF6') AND year>=2025 AND year<=2125)
+		WHERE Avg_emitter_price_2025_2125 IS NULL""")
 	conn.commit()
 	conn.close()
 
@@ -196,6 +212,17 @@ def get_tree_schedule_carbon_removal(vpt): # vpt is {(bidder, year): value} with
 						t = u + float(growth_year)
 						if t in mtC_removed: mtC_removed[t] += vpt_val * tc
 	return mtC_removed
+
+def compute_scenario_summary_stats(bidder_year_rows):
+	"""Return (avg_emitter_price, avg_remover_price, emissions_gtc, removal_cost_trillions) matching Summary_of_estimates_to_end_global_warming."""
+	removers = set(getRemovers())
+	carbon = [(qty, dp) for b, yr, qty, pct, dp, ul, vs in bidder_year_rows if b == 'Carbon' and 2025.0 <= yr <= 2125.0 and dp is not None]
+	ag = [dp for b, yr, qty, pct, dp, ul, vs in bidder_year_rows if b == 'Agriculture' and 2025.0 <= yr <= 2125.0 and dp is not None]
+	removal = sum(qty * dp for b, yr, qty, pct, dp, ul, vs in bidder_year_rows if b in removers and 2025.0 <= yr <= 2125.0 and dp is not None)
+	return (sum(dp for _, dp in carbon) / len(carbon) if carbon else None,
+		sum(ag) / len(ag) if ag else None,
+		sum(qty for qty, _ in carbon) / 1000.0 if carbon else None,
+		removal / 1_000_000.0)
 
 def get_land_rent(scenario_id):
 	"""Return total_area * sum_t(pi(Forestry_Land_t)) for the given scenario.

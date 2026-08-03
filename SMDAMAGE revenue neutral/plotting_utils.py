@@ -343,7 +343,7 @@ def Summary_of_estimates_to_end_global_warming(db_path, scenario_id_1, scenario_
 		removal_cost = 0.0
 		for remover in removers:
 			cursor.execute("SELECT COALESCE(SUM(quantity_value * dual_price), 0.0) FROM scenario_bidder_year WHERE scenario_id = ? AND bidder = ? AND year >= ? AND year <= ?", (scenario_id, remover, begin_year, end_year),)
-			removal_cost += cursor.fetchone()[0] or 0.0
+			removal_cost += cursor.fetchone()[0] # or 0.0
 		removal_cost_2025_2125.append(removal_cost / 1_000_000.0)
 
 		land_rent = _load_scalar(cursor, "SELECT land_rent FROM scenarios WHERE id = ?", (scenario_id,))
