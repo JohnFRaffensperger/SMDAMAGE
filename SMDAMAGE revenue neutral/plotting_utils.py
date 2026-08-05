@@ -328,7 +328,7 @@ def Summary_of_estimates_to_end_global_warming(db_path, scenario_id_1, scenario_
 
 	for _, scenario_id in zip(columns, scenario_ids):
 		net_revenue = _load_scalar(cursor, "SELECT net_revenue FROM scenarios WHERE id = ?", (scenario_id,))
-		third_party_pays.append(net_revenue / 1_000_000.0 if net_revenue is not None else None) # Convert millions to trillions.
+		third_party_pays.append(net_revenue if net_revenue is not None else None) # Already in trillions.
 
 		avg_emitter_price = _load_scalar(cursor, "SELECT AVG(dual_price) FROM scenario_bidder_year WHERE scenario_id = ? AND bidder = ? AND year >= ? AND year <= ?", (scenario_id, "Carbon", begin_year, end_year),)
 		average_emitter_price.append((avg_emitter_price, avg_emitter_price * 44.0 / 12.0) if avg_emitter_price is not None else (None, None)) # Convert $/C to $/CO2.
@@ -347,7 +347,7 @@ def Summary_of_estimates_to_end_global_warming(db_path, scenario_id_1, scenario_
 		removal_cost_2025_2125.append(removal_cost / 1_000_000.0)
 
 		land_rent = _load_scalar(cursor, "SELECT land_rent FROM scenarios WHERE id = ?", (scenario_id,))
-		land_rents.append(land_rent / 1_000_000.0 if land_rent is not None else None) # Convert millions to trillions.
+		land_rents.append(land_rent if land_rent is not None else None) # Already in trillions.
 
 	conn.close()
 

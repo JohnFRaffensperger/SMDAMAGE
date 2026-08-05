@@ -241,14 +241,14 @@ def get_scenario_tau(db_path, scenario_id):
 	conn.close()
 	return row[0] if row else None
 
-def save_scenario_series(db_path, scenario_id, series_name, year_to_value, units=None, series_source="temperature_output_csv"):
+def save_scenario_series(db_path, scenario_id, series_name, year_to_value, units=None):
 	"""Insert rows into scenario_series for one (scenario_id, series_name) pair."""
 	conn = sqlite3.connect(db_path)
 	cursor = conn.cursor()
 	cursor.executemany(
-		"""INSERT INTO scenario_series (scenario_id, series_name, year, value, units, series_source) VALUES (?,?,?,?,?,?)
-		ON CONFLICT(scenario_id, series_name, year) DO UPDATE SET value=excluded.value, units=excluded.units, series_source=excluded.series_source""",
-		[(scenario_id, series_name, float(year), value, units, series_source) for year, value in year_to_value.items()])
+		"""INSERT INTO scenario_series (scenario_id, series_name, year, value, units) VALUES (?,?,?,?,?)
+		ON CONFLICT(scenario_id, series_name, year) DO UPDATE SET value=excluded.value, units=excluded.units""",
+		[(scenario_id, series_name, float(year), value, units) for year, value in year_to_value.items()])
 	conn.commit()
 	conn.close()
 

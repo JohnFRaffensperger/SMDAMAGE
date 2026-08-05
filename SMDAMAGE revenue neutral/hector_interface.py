@@ -155,23 +155,11 @@ def getHectorEmissionsDictionary(RCP26_emissions_file): # e.g., "RCP26_emissions
 # Reads SMDAMAGE output for firstConstrainedYear, e.g., smdamage_solution_2075.csv. Outputs dictionary SMDAMAGE_emissions[year, emissionsType] = emissionaValue.
 # Called from getCarbonRemovedByForestry() and convert_SMDAMAGE_solution_to_Hector_input().
 def get_SMDAMAGE_emissions_dictionary (scenario):
-	with open (defaults_and_utilities.SMDAMAGE_output_file_name(scenario)) as SMDAMAGE_output_file: # Year, Tonnes/hectare/year Loblolly pine, Tonnes/hectare/year Ponderosa pine	Tonnes/hectare/year Black walnut
-		lines = [line.split(',') for line in SMDAMAGE_output_file]
-	SMDAMAGE_emissions = {}
-	for line in lines[2:]:
-		for columnNumber, item in enumerate(line): # All columns of primal values.
-			year = line[0]
-			if float(year) <= defaults_and_utilities.getLastBidYear():
-				emissionsType = lines[1][columnNumber].strip()
-				emissionsValue = item
-				# Convert to float safely, handling optional comma at end of line if any
-				# Added a try...except block to gracefully handle non-numeric values (like trailing commas or empty cells) during parsing.
-				try: val = float(emissionsValue)
-				except ValueError: continue
-				# Removed a legacy -1.0 multiplier for Agriculture mt, as the model now correctly handles removals by subtracting them from Hector's emissions categories downstream.
-				# SMDAMAGE_emissions[(float(year), emissionsType)] = (-1.0 if emissionsType == 'Agriculture mt' else 1.0)*val
-				SMDAMAGE_emissions[(float(year), emissionsType)] = val
-	return SMDAMAGE_emissions
+	scenario_id = database_interface.get_scenario_id(defaults_and_utilities.getSolutionsDBPath(), defaults_and_utilities.getExperimentTag(scenario))
+	if scenario_id is None: raise ValueError("Missing solutions DB scenario for Hector input conversion: " + defaults_and_utilities.getExperimentTag(scenario))
+	bidder_year = database_interface.get_scenario_bidder_year(defaults_and_utilities.getSolutionsDBPath(), scenario_id)
+	return {(year, bidder + " " + values['unit_label']): values['quantity_value'] for (bidder, year), values in bidder_year.items()
+		if values['quantity_value'] is not None and values['unit_label'] and year <= defaults_and_utilities.getLastBidYear()}
 # print(get_SMDAMAGE_emissions_dictionary("Rev neutral, tau is 1.766, tax only 2125 SMDAMAGE soln 2125.csv"))
 
 # Reads the SMDAMAGE solution for first_constrained_year and writes valid input for Hector, with RCP26_emissions.csv as a base.

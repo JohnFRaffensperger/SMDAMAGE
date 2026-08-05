@@ -1,7 +1,7 @@
 ﻿# Simulation of SMDAMAGE, by John F Raffensperger. 10 Aug 2019, 10 Sep 2022, 17 May 2023, 3 Feb 2025, 17 Mar 2026, 21 Jul 2026.
 # SMDAMAGE_0 is the long-run revenue-negative model from my 2021 paper.
 # SMDAMAGE_1 is the long-run revenue-neutral model.
-# SMDAMAGE_2 is the short-run (e.g., 2-year auctions) revenue-neutral model.
+# SMDAMAGE_2 is the short-run (e.g., 8-year auctions) revenue-neutral model. This model could be implemented in an emission trading system.
 
 # Hector uses gigatons of carbon, so we need to convert Hector's gigatons warming effects to SMDAMAGE megatons decision variables and back again to Hector gigatons for validation.
 # Critical values: discount rate in discount_rate(), StartYear (e.g., 2025), BeginConstraintYear (warming deadline, e.g., 2125), revenue neutrality as REVENUE_NEUTRAL, and InitialTemperature.
@@ -227,7 +227,7 @@ def Solve_SMDAMAGE(scenario, APT_set, PT_set, Bapt, Uapt, Wpt_dict, BidStepSet, 
 				if (a, p, t) in restricted_APT_set: continue
 				next_coeff, _ = bids_p[a]
 				next_reduced_cost = next_coeff * discount / kt_divisor + dual
-				if next_reduced_cost > - 0.0001: # Take columns with near zero reduced cost to kill off degeneracy.
+				if next_reduced_cost > -0.01: # Take columns with near zero reduced cost to kill off degeneracy.
 					restricted_APT_set.add((a, p, t))
 					expanded = True
 					added_cols += 1
@@ -245,7 +245,8 @@ def Solve_SMDAMAGE(scenario, APT_set, PT_set, Bapt, Uapt, Wpt_dict, BidStepSet, 
 			scenario.solution_datetime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 			return SMDAMAGE, qapt, vpt, temperatureChange, (taxedTemperatureChange if scenario.is_revenue_neutral else None), Vname, solve_status
 
-# We've solved the optimization, now store it in the database and wherever you want to put it.
+# We've solved the optimization, now store it in the database and wherever else you want to put it.
+# Called from run_SMDAMAGE and run_SMDAMAGE_for_tau.
 def save_solution_to_db(scenario, SMDAMAGE, vpt, qapt, Vname, temp_data=None, scenario_series_entries=None, bidder_year_rows=None):
 	db_path = defaults_and_utilities.getSolutionsDBPath()
 	defaults_and_utilities.ensure_solutions_db()
@@ -254,12 +255,12 @@ def save_solution_to_db(scenario, SMDAMAGE, vpt, qapt, Vname, temp_data=None, sc
 	cursor = conn.cursor()
 
 	sol_datetime = getattr(scenario, 'solution_datetime', datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-	net_revenue = -sum(vpt[p, t].varValue * SMDAMAGE.constraints[Vname[(p, t)]].pi for (p, t) in Vname if Vname[(p, t)] in SMDAMAGE.constraints)
+	net_revenue = -sum(vpt[p, t].varValue * SMDAMAGE.constraints[Vname[(p, t)]].pi for (p, t) in Vname if Vname[(p, t)] in SMDAMAGE.constraints) / 1_000_000.0 # trillions
 	forestry_meta = database_interface.get_forestry_contractdata()
-	land_rent = sum(meta['available_area_mhectares'] for meta in forestry_meta.values()) * sum((c.pi or 0.0) for name, c in SMDAMAGE.constraints.items() if name.startswith('Forestry_Land_'))
+	land_rent = sum(meta['available_area_mhectares'] for meta in forestry_meta.values()) * sum((c.pi or 0.0) for name, c in SMDAMAGE.constraints.items() if name.startswith('Forestry_Land_')) / 1_000_000.0 # trillions
 	cursor.execute("INSERT INTO scenarios (name, discount_rate, initial_temp, tau, is_revenue_neutral, is_removal_luc, use_updated_Wpt, solver_status, net_revenue, land_rent, objective_value, solution_datetime) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
 		(defaults_and_utilities.getExperimentTag(scenario), scenario.discount_rate_base, scenario.initial_temperature, scenario.tau, 1 if scenario.is_revenue_neutral else 0,
-		1 if scenario.is_removal_luc else 0, 1 if scenario.use_updated_Wpt else 0, LpStatus[SMDAMAGE.status], net_revenue, land_rent, value(SMDAMAGE.objective), sol_datetime))
+		1 if scenario.is_removal_luc else 0, 1 if scenario.use_updated_Wpt else 0, LpStatus[SMDAMAGE.status], net_revenue, land_rent, value(SMDAMAGE.objective) / 1_000_000.0, sol_datetime))
 	scenario_id = cursor.lastrowid
 
 	# Save the nonzero solution.
@@ -270,13 +271,13 @@ def save_solution_to_db(scenario, SMDAMAGE, vpt, qapt, Vname, temp_data=None, sc
 
 	if temp_data:
 		for source, year_to_value in temp_data.items():
-			cursor.executemany("""INSERT INTO scenario_series (scenario_id, series_name, year, value, units, series_source) VALUES (?,?,?,?,?,?) ON CONFLICT(scenario_id, series_name, year) DO UPDATE SET value=excluded.value, units=excluded.units, series_source=excluded.series_source""",
-				[(scenario_id, source, float(year), value, None, "temperature_output_csv") for year, value in year_to_value.items()])
+			cursor.executemany("""INSERT INTO scenario_series (scenario_id, series_name, year, value, units) VALUES (?,?,?,?,?) ON CONFLICT(scenario_id, series_name, year) DO UPDATE SET value=excluded.value, units=excluded.units""",
+				[(scenario_id, source, float(year), value, None) for year, value in year_to_value.items()])
 
 	if scenario_series_entries:
-		for series_name, year_to_value, units, series_source in scenario_series_entries:
-			cursor.executemany("""INSERT INTO scenario_series (scenario_id, series_name, year, value, units, series_source) VALUES (?,?,?,?,?,?) ON CONFLICT(scenario_id, series_name, year) DO UPDATE SET value=excluded.value, units=excluded.units, series_source=excluded.series_source""",
-				[(scenario_id, series_name, float(year), value, units, series_source) for year, value in year_to_value.items()])
+		for series_name, year_to_value, units in scenario_series_entries:
+			cursor.executemany("""INSERT INTO scenario_series (scenario_id, series_name, year, value, units) VALUES (?,?,?,?,?) ON CONFLICT(scenario_id, series_name, year) DO UPDATE SET value=excluded.value, units=excluded.units""",
+				[(scenario_id, series_name, float(year), value, units) for year, value in year_to_value.items()])
 
 	if bidder_year_rows:
 		cursor.executemany("""INSERT INTO scenario_bidder_year (scenario_id, bidder, year, quantity_value, pct_max_bid, dual_price, unit_label, value_source)
@@ -343,14 +344,14 @@ def run_SMDAMAGE(scenario):
 	if scenario.is_revenue_neutral: temp_data["SMDAMAGE taxed temp calibrated" if scenario.use_updated_Wpt else "SMDAMAGE taxed temp uncalibrated"] = {t: scenario.initial_temperature + taxedTemperatureChange[t].varValue for t in defaults_and_utilities.getBidPeriods()}
 
 	actual_source = "SMDAMAGE actual temp calibrated" if scenario.use_updated_Wpt else "SMDAMAGE actual temp uncalibrated"
-	scenario_series_entries = [(actual_source, {t: scenario.initial_temperature + temperatureChange[t].varValue for t in defaults_and_utilities.getModelPeriods()}, "thousandths_C", "smdamage_soln_csv")]
+	scenario_series_entries = [(actual_source, {t: scenario.initial_temperature + temperatureChange[t].varValue for t in defaults_and_utilities.getModelPeriods()}, "thousandths_C")]
 	if scenario.is_revenue_neutral:
 		taxed_source = "SMDAMAGE taxed temp calibrated" if scenario.use_updated_Wpt else "SMDAMAGE taxed temp uncalibrated"
-		scenario_series_entries.append((taxed_source, {t: scenario.initial_temperature + taxedTemperatureChange[t].varValue for t in defaults_and_utilities.getModelPeriods()}, "thousandths_C", "smdamage_soln_csv"))
-	scenario_series_entries.append(("Forestry carbon", defaults_and_utilities.get_tree_schedule_carbon_removal({k: v.varValue for k, v in vpt.items()}), "mtC", "smdamage_soln_csv"))
+		scenario_series_entries.append((taxed_source, {t: scenario.initial_temperature + taxedTemperatureChange[t].varValue for t in defaults_and_utilities.getModelPeriods()}, "thousandths_C"))
+	scenario_series_entries.append(("Forestry carbon", defaults_and_utilities.get_tree_schedule_carbon_removal({k: v.varValue for k, v in vpt.items()}), "mtC"))
 	scenario_id = save_solution_to_db(scenario, SMDAMAGE, vpt, qapt, Vname, temp_data, scenario_series_entries, bidder_year_rows)
 	land_rent = defaults_and_utilities.get_land_rent(scenario_id)
-	print (f"Solve status {solve_status}. Objective ${value(SMDAMAGE.objective) / 1000:.2f} billion. Net revenue {netrevenue}. Land rent {land_rent:.2f}. Tau {local_tau}. 2125 temp " + str(round(scenario.initial_temperature + temperatureChange [2125].varValue,3)) + f" thousandths C. Total time {time.time() - start_time:.1f}s.")
+	print (f"Solve status {solve_status}. Objective ${value(SMDAMAGE.objective) / 1000:.2f} billion. Net revenue {netrevenue / 1_000_000.0:.4f} trillion. Land rent {land_rent:.4f} trillion. Tau {local_tau}. 2125 temp " + str(round(scenario.initial_temperature + temperatureChange [2125].varValue,3)) + f" thousandths C. Total time {time.time() - start_time:.1f}s.")
 
 	return scenario_id
 # END run_SMDAMAGE().
@@ -447,12 +448,12 @@ def run_SMDAMAGE_for_tau(scenario):
 		temp_data["SMDAMAGE tau calibrated" if scenario.use_updated_Wpt else "SMDAMAGE tau uncalibrated"] = current_tau
 
 		actual_source = "SMDAMAGE actual temp calibrated" if scenario.use_updated_Wpt else "SMDAMAGE actual temp uncalibrated"
-		scenario_series_entries = [(actual_source, {t: scenario.initial_temperature + temperatureChange[t].varValue for t in defaults_and_utilities.getModelPeriods()}, "thousandths_C", "smdamage_soln_csv")]
+		scenario_series_entries = [(actual_source, {t: scenario.initial_temperature + temperatureChange[t].varValue for t in defaults_and_utilities.getModelPeriods()}, "thousandths_C")]
 		if scenario.is_revenue_neutral and taxedTemperatureChange is not None:
 			taxed_source = "SMDAMAGE taxed temp calibrated" if scenario.use_updated_Wpt else "SMDAMAGE taxed temp uncalibrated"
-			scenario_series_entries.append((taxed_source, {t: scenario.initial_temperature + taxedTemperatureChange[t].varValue for t in defaults_and_utilities.getModelPeriods()}, "thousandths_C", "smdamage_soln_csv"))
-		scenario_series_entries.append(("SMDAMAGE tau calibrated" if scenario.use_updated_Wpt else "SMDAMAGE tau uncalibrated", current_tau, "ratio", "temperature_output_csv"))
-		scenario_series_entries.append(("Forestry carbon", defaults_and_utilities.get_tree_schedule_carbon_removal({k: v.varValue for k, v in vpt.items()}), "mtC", "smdamage_soln_csv"))
+			scenario_series_entries.append((taxed_source, {t: scenario.initial_temperature + taxedTemperatureChange[t].varValue for t in defaults_and_utilities.getModelPeriods()}, "thousandths_C"))
+		scenario_series_entries.append(("SMDAMAGE tau calibrated" if scenario.use_updated_Wpt else "SMDAMAGE tau uncalibrated", current_tau, "ratio"))
+		scenario_series_entries.append(("Forestry carbon", defaults_and_utilities.get_tree_schedule_carbon_removal({k: v.varValue for k, v in vpt.items()}), "mtC"))
 
 		Units = {b['bidder_name']: b['units'] for b in database_interface.get_bidders()}
 		bidder_year_rows = []
@@ -506,7 +507,7 @@ def run_SMDAMAGE_short_auctions(years_in_auction, land_scale_factor, scenario):
 	solution_datetime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 	# Run short auctions. Running this out to 2300 seems dumb, but we need it for a valid comparison with the other experiments.
-	for startyear in range(int(min(AllBidPeriods)), int(max(AllBidPeriods)) - YEARS_IN_AUCTION, YEARS_IN_AUCTION):
+	for startyear in range(int(min(AllBidPeriods)), int(max(AllBidPeriods)) - years_in_auction, years_in_auction):
 	# for startyear in range(2025, 2133, years_in_auction):
 		BidPeriods = [float(startyear + i) for i in range(years_in_auction)]
 
@@ -603,14 +604,14 @@ def run_SMDAMAGE_short_auctions(years_in_auction, land_scale_factor, scenario):
 	# Save solution to database.
 	defaults_and_utilities.ensure_solutions_db()
 	db_path = defaults_and_utilities.getSolutionsDBPath()
-	net_revenue = -sum(all_vpt_values[(p, t)] * all_duals.get(all_Vname[(p, t)], 0.0) for (p, t) in all_Vname)
-	land_rent = total_land_rent
+	net_revenue = -sum(all_vpt_values[(p, t)] * all_duals.get(all_Vname[(p, t)], 0.0) for (p, t) in all_Vname) / 1_000_000.0 # trillions
+	land_rent = total_land_rent / 1_000_000.0 # trillions
 	conn = sqlite3.connect(db_path)
 	cursor = conn.cursor()
 	cursor.execute("INSERT INTO scenarios (name, discount_rate, initial_temp, tau, is_revenue_neutral, is_removal_luc, use_updated_Wpt, solver_status, net_revenue, land_rent, objective_value, solution_datetime) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
 		(defaults_and_utilities.getExperimentTag(scenario), scenario.discount_rate_base, scenario.initial_temperature, scenario.tau,
 		 1 if scenario.is_revenue_neutral else 0, 1 if scenario.is_removal_luc else 0,
-		 1 if scenario.use_updated_Wpt else 0, last_solve_status, net_revenue, land_rent, total_objective, solution_datetime))
+		 1 if scenario.use_updated_Wpt else 0, last_solve_status, net_revenue, land_rent, total_objective / 1_000_000.0, solution_datetime))
 	scenario_id = cursor.lastrowid
 	assert scenario_id, "Failed to insert short-auctions scenario into smdamage_solutions.db."
 	if all_qapt_rows: cursor.executemany("INSERT INTO variables (scenario_id, bidder, year, bid_step, value) VALUES (?,?,?,?,?) ON CONFLICT(scenario_id, bidder, year, bid_step) DO UPDATE SET value=excluded.value",
@@ -618,15 +619,15 @@ def run_SMDAMAGE_short_auctions(years_in_auction, land_scale_factor, scenario):
 	if all_duals: cursor.executemany("INSERT INTO constraint_duals (scenario_id, constraint_name, pi) VALUES (?,?,?) ON CONFLICT(scenario_id, constraint_name) DO UPDATE SET pi=excluded.pi",
 		[(scenario_id, c_name, pi) for c_name, pi in all_duals.items()])
 	actual_source = "SMDAMAGE actual temp calibrated" if scenario.use_updated_Wpt else "SMDAMAGE actual temp uncalibrated"
-	series_entries = [(actual_source, full_temp, "thousandths_C", "smdamage_soln_csv"),
-		("SMDAMAGE yearly revenue " + ("calibrated" if scenario.use_updated_Wpt else "uncalibrated"), all_yearlyrevenue, None, "temperature_output_csv"),
-		("Forestry carbon", defaults_and_utilities.get_tree_schedule_carbon_removal(Fixed_Vpt), "mtC", "smdamage_soln_csv")]
+	series_entries = [(actual_source, full_temp, "thousandths_C"),
+		("SMDAMAGE yearly revenue " + ("calibrated" if scenario.use_updated_Wpt else "uncalibrated"), all_yearlyrevenue, None),
+		("Forestry carbon", defaults_and_utilities.get_tree_schedule_carbon_removal(Fixed_Vpt), "mtC")]
 	if scenario.is_revenue_neutral:
 		taxed_source = "SMDAMAGE taxed temp calibrated" if scenario.use_updated_Wpt else "SMDAMAGE taxed temp uncalibrated"
-		series_entries.append((taxed_source, full_taxed_temp, "thousandths_C", "smdamage_soln_csv"))
-	for series_name, year_to_value, units, series_source in series_entries:
-		cursor.executemany("INSERT INTO scenario_series (scenario_id, series_name, year, value, units, series_source) VALUES (?,?,?,?,?,?) ON CONFLICT(scenario_id, series_name, year) DO UPDATE SET value=excluded.value, units=excluded.units, series_source=excluded.series_source",
-			[(scenario_id, series_name, float(year), val, units, series_source) for year, val in year_to_value.items()])
+		series_entries.append((taxed_source, full_taxed_temp, "thousandths_C"))
+	for series_name, year_to_value, units in series_entries:
+		cursor.executemany("INSERT INTO scenario_series (scenario_id, series_name, year, value, units) VALUES (?,?,?,?,?) ON CONFLICT(scenario_id, series_name, year) DO UPDATE SET value=excluded.value, units=excluded.units",
+			[(scenario_id, series_name, float(year), val, units) for year, val in year_to_value.items()])
 	if bidder_year_rows: cursor.executemany("INSERT INTO scenario_bidder_year (scenario_id, bidder, year, quantity_value, pct_max_bid, dual_price, unit_label, value_source) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(scenario_id, bidder, year) DO UPDATE SET quantity_value=excluded.quantity_value, pct_max_bid=excluded.pct_max_bid, dual_price=excluded.dual_price, unit_label=excluded.unit_label, value_source=excluded.value_source",
 		[(scenario_id,) + row for row in bidder_year_rows])
 	avg_ep, avg_rp, emis, removal = defaults_and_utilities.compute_scenario_summary_stats(bidder_year_rows)

@@ -133,15 +133,15 @@ def tableToHtml(query, optionalFileName = str(DEFAULT_HTML_FILE), talk=True, dat
 def printQueryRows(query, databaseFileName = str(DEFAULT_DB_FILE)): print((result[1] if (result := tableToHtml(query, optionalFileName='NUL', talk=False, databaseFileName=databaseFileName)) else []))
 
 tableToHtml("""WITH by_data AS (SELECT bidder, year, quantity_value, dual_price,
-    CASE WHEN bidder IN ('C2F6','CF4','CH4','Carbon','HFC125','HFC134a','HFC143a','N2O','SF6')
-         THEN 'Emitter' ELSE 'Remover' END AS bidder_class
-  FROM scenario_bidder_year WHERE scenario_id=11 AND year BETWEEN 2025 AND 2125)
-SELECT (SELECT name        FROM scenarios WHERE id=11) AS scenario_name,
-  (SELECT net_revenue FROM scenarios WHERE id=11) AS net_revenue,
-  ROUND(AVG(CASE WHEN bidder_class='Emitter' THEN dual_price END), 4) AS avg_emitter_price,
-  ROUND(AVG(CASE WHEN bidder_class='Remover' THEN dual_price END), 4) AS avg_remover_price,
-  ROUND(SUM(CASE WHEN bidder_class='Emitter' THEN quantity_value ELSE 0 END), 4) AS total_emissions,
-  ROUND(SUM(CASE WHEN bidder_class='Remover' THEN quantity_value*dual_price ELSE 0 END), 4) AS removal_cost,
-  (SELECT land_rent   FROM scenarios WHERE id=11) AS land_rent FROM by_data""",
+  CASE WHEN bidder IN ('C2F6','CF4','CH4','Carbon','HFC125','HFC134a','HFC143a','N2O','SF6') THEN 'Emitter' ELSE 'Remover' END AS bidder_class
+  FROM scenario_bidder_year WHERE scenario_id=11)
+SELECT
+  (SELECT name FROM scenarios WHERE id=11) AS scenario_name,
+  (SELECT ROUND(net_revenue/1000000.0, 6) FROM scenarios WHERE id=11) AS stored_net_revenue_trillions,
+  ROUND(SUM(CASE WHEN bidder_class='Emitter' THEN quantity_value*dual_price ELSE 0 END) / 1000000.0, 6) AS revenue_from_emitters,
+  ROUND(SUM(CASE WHEN bidder_class='Remover' THEN quantity_value*dual_price ELSE 0 END) / 1000000.0, 6) AS payments_to_removers,
+  (SELECT ROUND(land_rent/1000000.0, 6) FROM scenarios WHERE id=11) AS land_rent_trillions,
+  ROUND(SUM(quantity_value*dual_price) / 1000000.0 + (SELECT land_rent/1000000.0 FROM scenarios WHERE id=11), 6) AS net_after_land_rent
+FROM by_data""",
    str(DEFAULT_HTML_FILE), databaseFileName=str(SOLUTIONS_DB_FILE))
 

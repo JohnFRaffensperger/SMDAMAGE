@@ -12,16 +12,16 @@ import database_interface # for dynamic bidder and tree data.
 
 # Directories and file names.
 _HERE = os.path.dirname(os.path.abspath(__file__))
-def getOutputDirectory():           return os.path.join(_HERE, "Output", "")
-def getSolutionsDBPath():           return os.path.join(_HERE, "Output", "smdamage_solutions.db")
+def getOutputDirectory(): return os.path.join(_HERE, "Output", "")
+def getSolutionsDBPath(): return os.path.join(_HERE, "Output", "smdamage_solutions.db")
 def ensure_solutions_db():
 	import sqlite3
 	db_path = getSolutionsDBPath()
 	conn = sqlite3.connect(db_path)
 	cursor = conn.cursor()
 	cursor.executescript("""CREATE TABLE IF NOT EXISTS scenarios (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, discount_rate REAL, initial_temp REAL, tau REAL,
-			is_revenue_neutral INTEGER, is_removal_luc INTEGER, use_updated_Wpt INTEGER, solver_status TEXT, net_revenue REAL, objective_value REAL, solution_datetime TEXT,
-			Avg_emitter_price_2025_2125 REAL, Avg_remover_price_2025_2125 REAL, Emissions_2025_2125 REAL, Removal_cost_2025_2125 REAL);
+			is_revenue_neutral INTEGER, is_removal_luc INTEGER, use_updated_Wpt INTEGER, solver_status TEXT, objective_value REAL, Removal_cost_2025_2125 REAL,
+			net_revenue REAL, Emissions_2025_2125 REAL, Avg_emitter_price_2025_2125 REAL, Avg_remover_price_2025_2125 REAL, solution_datetime TEXT);
 		CREATE TABLE IF NOT EXISTS variables (id INTEGER PRIMARY KEY AUTOINCREMENT, scenario_id INTEGER, bidder TEXT, year REAL, bid_step INTEGER, value REAL,
 			FOREIGN KEY (scenario_id) REFERENCES scenarios(id));
 		CREATE TABLE IF NOT EXISTS constraint_duals (id INTEGER PRIMARY KEY AUTOINCREMENT, scenario_id INTEGER, constraint_name TEXT, pi REAL, FOREIGN KEY (scenario_id) REFERENCES scenarios(id));
@@ -37,7 +37,7 @@ def ensure_solutions_db():
 		CREATE UNIQUE INDEX IF NOT EXISTS uq_scenario_bidder_year ON scenario_bidder_year(scenario_id, bidder, year);
 		CREATE INDEX IF NOT EXISTS idx_scenario_bidder_year_bidder ON scenario_bidder_year(scenario_id, bidder);
 		CREATE TABLE IF NOT EXISTS scenario_series (id INTEGER PRIMARY KEY AUTOINCREMENT, scenario_id INTEGER NOT NULL,
-			series_name TEXT NOT NULL, year REAL NOT NULL, value REAL, units TEXT, series_source TEXT NOT NULL,
+			series_name TEXT NOT NULL, year REAL NOT NULL, value REAL, units TEXT,
 			FOREIGN KEY (scenario_id) REFERENCES scenarios(id));
 		CREATE UNIQUE INDEX IF NOT EXISTS uq_scenario_series ON scenario_series(scenario_id, series_name, year);
 		CREATE INDEX IF NOT EXISTS idx_scenario_series_name ON scenario_series(scenario_id, series_name);""")
@@ -55,7 +55,7 @@ def ensure_solutions_db():
 	except Exception: pass
 	forestry_meta_mig = database_interface.get_forestry_contractdata()
 	total_area_mig = sum(meta['available_area_mhectares'] for meta in forestry_meta_mig.values())
-	cursor.execute("UPDATE scenarios SET land_rent = (SELECT ? * COALESCE(SUM(cd.pi), 0.0) FROM constraint_duals cd WHERE cd.scenario_id = scenarios.id AND cd.constraint_name LIKE 'Forestry_Land_%') WHERE land_rent IS NULL", (total_area_mig,))
+	cursor.execute("UPDATE scenarios SET land_rent = (SELECT ? * COALESCE(SUM(cd.pi), 0.0) FROM constraint_duals cd WHERE cd.scenario_id = scenarios.id AND cd.constraint_name LIKE 'Forestry_Land_%') WHERE land_rent IS NULL", (total_area_mig / 1_000_000.0,))
 	cursor.execute("""UPDATE scenarios SET
 		Avg_emitter_price_2025_2125 = (SELECT AVG(dual_price) FROM scenario_bidder_year WHERE scenario_id=scenarios.id AND bidder='Carbon' AND year>=2025 AND year<=2125),
 		Avg_remover_price_2025_2125 = (SELECT AVG(dual_price) FROM scenario_bidder_year WHERE scenario_id=scenarios.id AND bidder='Agriculture' AND year>=2025 AND year<=2125),
@@ -182,7 +182,7 @@ def compute_scenario_summary_stats(bidder_year_rows):
 		removal / 1_000_000.0)
 
 def get_land_rent(scenario_id):
-	"""Return total_area * sum_t(pi(Forestry_Land_t)) for the given scenario.
+	"""Return total_area * sum_t(pi(Forestry_Land_t)) in trillions for the given scenario.
 	This is the rent earned by forestry bidders from the land constraint —
 	a term missing from the Vpt-dual-based netrevenue calculation."""
 	forestry_meta = database_interface.get_forestry_contractdata()
@@ -192,4 +192,4 @@ def get_land_rent(scenario_id):
 	cursor.execute("SELECT COALESCE(SUM(pi), 0.0) FROM constraint_duals WHERE scenario_id = ? AND constraint_name LIKE 'Forestry_Land_%'", (scenario_id,))
 	sum_pi = cursor.fetchone()[0]
 	conn.close()
-	return total_area * sum_pi
+	return total_area * sum_pi / 1_000_000.0
