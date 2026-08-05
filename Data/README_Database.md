@@ -6,7 +6,7 @@ This README documents how `create_database.py` builds `smdamage_data.db` and how
 
 - `SMDAMAGE revenue neutral/create_database.py`: builds `Data/smdamage_data.db`.
 - `SMDAMAGE revenue neutral/database_interface.py`: query helpers used by SMDAMAGE.
-- `Data/smdamage_data.db`: runtime database used by `SMDAMAGE revenue neutral.py`.
+- `Data/smdamage_data.db`: runtime database used by `smdamage_models.py`.
 
 ## What Is Imported
 
@@ -38,7 +38,7 @@ The function `load_forestry_from_busch_sqlite()` performs one transaction that:
     - `cluster_index`
     - `available_area_mhectares`
 
-This allows `SMDAMAGE revenue neutral.py` to pull bids for the scenario discount rate directly from `smdamage_data.db`.
+This allows `smdamage_models.py` to pull bids for the scenario discount rate directly from `smdamage_data.db`.
 
 ## Build Steps
 

@@ -4,7 +4,7 @@ Database interface module for SMDAMAGE. Made by Claude with JFR's guidance.
 """
 # >>> Part I. Preliminaries, inputs, key parameters: create_database.py, database_interface.py, and defaults_and_utilities.py.
 # Part II. Getting pulse information from Hector: hector_interface.py.
-# Part III. SMDAMAGE: "SMDAMAGE revenue neutral.py"
+# Part III. SMDAMAGE: "smdamage_models.py"
 # Part IV. Running Hector on SMDAMAGE output. hector_interface.py.
 
 import sqlite3
@@ -246,9 +246,9 @@ def save_scenario_series(db_path, scenario_id, series_name, year_to_value, units
 	conn = sqlite3.connect(db_path)
 	cursor = conn.cursor()
 	cursor.executemany(
-		"""INSERT INTO scenario_series (scenario_id, series_name, year, value, units) VALUES (?,?,?,?,?)
-		ON CONFLICT(scenario_id, series_name, year) DO UPDATE SET value=excluded.value, units=excluded.units""",
-		[(scenario_id, series_name, float(year), value, units) for year, value in year_to_value.items()])
+		"""INSERT INTO scenario_series (scenario_id, series_name, year, value, units, series_source) VALUES (?,?,?,?,?,?)
+		ON CONFLICT(scenario_id, series_name, year) DO UPDATE SET value=excluded.value, units=excluded.units, series_source=excluded.series_source""",
+		[(scenario_id, series_name, float(year), value, units, 'SMDAMAGE') for year, value in year_to_value.items()])
 	conn.commit()
 	conn.close()
 
@@ -315,6 +315,25 @@ def get_vpt_dual_series_by_scenario_id(db_path, scenario_id, bidder='Carbon'):
 		last_comma = inner.rfind(',')
 		series[float(inner[last_comma + 1:])] = pi
 	return series
+
+def get_qapt_values_from_db(db_path, scenario_id):
+	"""Return {(bid_step, bidder, year): value} for all nonzero variables of a scenario."""
+	conn = sqlite3.connect(db_path)
+	cursor = conn.cursor()
+	cursor.execute("SELECT bid_step, bidder, year, value FROM variables WHERE scenario_id = ? AND value != 0.0", (scenario_id,))
+	rows = cursor.fetchall()
+	conn.close()
+	return {(int(r[0]), r[1], float(r[2])): r[3] for r in rows}
+
+def get_scenario_full_params(db_path, scenario_id):
+	"""Return scenario parameters as dict for reconstructing a Scenario object."""
+	conn = sqlite3.connect(db_path)
+	cursor = conn.cursor()
+	cursor.execute("SELECT discount_rate, initial_temp, tau, is_revenue_neutral, is_removal_luc, use_updated_Wpt, calibration_scenario FROM scenarios WHERE id = ?", (scenario_id,))
+	row = cursor.fetchone()
+	conn.close()
+	if row is None: raise ValueError(f"No scenario found with id={scenario_id}")
+	return dict(zip(['discount_rate', 'initial_temp', 'tau', 'is_revenue_neutral', 'is_removal_luc', 'use_updated_Wpt', 'calibration_scenario'], row))
 
 def get_previous_acceptedbidsteps(db_path, scenario_id=None):
 	"""Return (previous_acceptedbidsteps, binding_constraints, vpt_duals) from smdamage_solutions.db."""

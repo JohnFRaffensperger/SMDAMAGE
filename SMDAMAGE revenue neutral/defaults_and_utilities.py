@@ -1,6 +1,6 @@
 # >>> Part I. Preliminaries, inputs, key parameters: create_database.py, database_interface.py, and defaults_and_utilities.py.
 # Part II. Getting pulse information from Hector: hector_interface.py.
-# Part III. SMDAMAGE: "SMDAMAGE revenue neutral.py"
+# Part III. SMDAMAGE: "smdamage_models.py"
 # Part IV. Running Hector on SMDAMAGE output. hector_interface.py.
 # =============================================================================================
 
@@ -21,7 +21,8 @@ def ensure_solutions_db():
 	cursor = conn.cursor()
 	cursor.executescript("""CREATE TABLE IF NOT EXISTS scenarios (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, discount_rate REAL, initial_temp REAL, tau REAL,
 			is_revenue_neutral INTEGER, is_removal_luc INTEGER, use_updated_Wpt INTEGER, solver_status TEXT, objective_value REAL, Removal_cost_2025_2125 REAL,
-			net_revenue REAL, Emissions_2025_2125 REAL, Avg_emitter_price_2025_2125 REAL, Avg_remover_price_2025_2125 REAL, solution_datetime TEXT);
+			net_revenue REAL, Emissions_2025_2125 REAL, Avg_emitter_price_2025_2125 REAL, Avg_remover_price_2025_2125 REAL, solution_datetime TEXT,
+			is_land_constraint_implicit INTEGER DEFAULT 0, calibration_scenario INTEGER, emitters_pay REAL, removers_get REAL);
 		CREATE TABLE IF NOT EXISTS variables (id INTEGER PRIMARY KEY AUTOINCREMENT, scenario_id INTEGER, bidder TEXT, year REAL, bid_step INTEGER, value REAL,
 			FOREIGN KEY (scenario_id) REFERENCES scenarios(id));
 		CREATE TABLE IF NOT EXISTS constraint_duals (id INTEGER PRIMARY KEY AUTOINCREMENT, scenario_id INTEGER, constraint_name TEXT, pi REAL, FOREIGN KEY (scenario_id) REFERENCES scenarios(id));
@@ -37,7 +38,7 @@ def ensure_solutions_db():
 		CREATE UNIQUE INDEX IF NOT EXISTS uq_scenario_bidder_year ON scenario_bidder_year(scenario_id, bidder, year);
 		CREATE INDEX IF NOT EXISTS idx_scenario_bidder_year_bidder ON scenario_bidder_year(scenario_id, bidder);
 		CREATE TABLE IF NOT EXISTS scenario_series (id INTEGER PRIMARY KEY AUTOINCREMENT, scenario_id INTEGER NOT NULL,
-			series_name TEXT NOT NULL, year REAL NOT NULL, value REAL, units TEXT,
+			series_name TEXT NOT NULL, year REAL NOT NULL, value REAL, units TEXT, series_source TEXT NOT NULL DEFAULT 'SMDAMAGE',
 			FOREIGN KEY (scenario_id) REFERENCES scenarios(id));
 		CREATE UNIQUE INDEX IF NOT EXISTS uq_scenario_series ON scenario_series(scenario_id, series_name, year);
 		CREATE INDEX IF NOT EXISTS idx_scenario_series_name ON scenario_series(scenario_id, series_name);""")
@@ -53,6 +54,16 @@ def ensure_solutions_db():
 	except Exception: pass
 	try: cursor.execute("ALTER TABLE scenarios ADD COLUMN Removal_cost_2025_2125 REAL")
 	except Exception: pass
+	try: cursor.execute("ALTER TABLE scenarios ADD COLUMN is_land_constraint_implicit INTEGER DEFAULT 0")
+	except Exception: pass
+	try: cursor.execute("ALTER TABLE scenarios ADD COLUMN calibration_scenario INTEGER")
+	except Exception: pass
+	try: cursor.execute("ALTER TABLE scenarios ADD COLUMN emitters_pay REAL")
+	except Exception: pass
+	try: cursor.execute("ALTER TABLE scenarios ADD COLUMN removers_get REAL")
+	except Exception: pass
+	try: cursor.execute("ALTER TABLE scenario_series ADD COLUMN series_source TEXT NOT NULL DEFAULT 'SMDAMAGE'")
+	except Exception: pass
 	forestry_meta_mig = database_interface.get_forestry_contractdata()
 	total_area_mig = sum(meta['available_area_mhectares'] for meta in forestry_meta_mig.values())
 	cursor.execute("UPDATE scenarios SET land_rent = (SELECT ? * COALESCE(SUM(cd.pi), 0.0) FROM constraint_duals cd WHERE cd.scenario_id = scenarios.id AND cd.constraint_name LIKE 'Forestry_Land_%') WHERE land_rent IS NULL", (total_area_mig / 1_000_000.0,))
@@ -63,6 +74,19 @@ def ensure_solutions_db():
 		Removal_cost_2025_2125 = (SELECT COALESCE(SUM(quantity_value*dual_price),0.0)/1000000.0 FROM scenario_bidder_year WHERE scenario_id=scenarios.id
 			AND bidder NOT IN ('C2F6','CF4','CH4','Carbon','HFC125','HFC134a','HFC143a','N2O','SF6') AND year>=2025 AND year<=2125)
 		WHERE Avg_emitter_price_2025_2125 IS NULL""")
+	cursor.execute("""UPDATE scenarios SET
+		emitters_pay = (SELECT COALESCE(SUM(quantity_value*dual_price),0.0)/1000000.0 FROM scenario_bidder_year
+			WHERE scenario_id=scenarios.id AND bidder IN ('C2F6','CF4','CH4','Carbon','HFC125','HFC134a','HFC143a','N2O','SF6')),
+		removers_get = (SELECT COALESCE(SUM(quantity_value*dual_price),0.0)/1000000.0 FROM scenario_bidder_year
+			WHERE scenario_id=scenarios.id AND bidder NOT IN ('C2F6','CF4','CH4','Carbon','HFC125','HFC134a','HFC143a','N2O','SF6'))
+		WHERE emitters_pay IS NULL""")
+	cursor.execute("UPDATE scenarios SET is_land_constraint_implicit = 0 WHERE is_land_constraint_implicit IS NULL")
+	cursor.execute("""UPDATE scenarios SET calibration_scenario = (
+		SELECT fw.calibration_scenario_id FROM fitted_wpt fw
+		JOIN scenarios s2 ON s2.id = fw.calibration_scenario_id
+		WHERE s2.is_removal_luc = scenarios.is_removal_luc
+		ORDER BY fw.calibration_scenario_id ASC LIMIT 1)
+		WHERE calibration_scenario IS NULL AND use_updated_Wpt = 1""")
 	conn.commit()
 	conn.close()
 
@@ -171,15 +195,20 @@ def get_tree_schedule_carbon_removal(vpt): # vpt is {(bidder, year): value} with
 	return mtC_removed
 
 def compute_scenario_summary_stats(bidder_year_rows):
-	"""Return (avg_emitter_price, avg_remover_price, emissions_gtc, removal_cost_trillions) matching Summary_of_estimates_to_end_global_warming."""
+	"""Return (avg_emitter_price, avg_remover_price, emissions_gtc, removal_cost_trillions, emitters_pay_trillions, removers_get_trillions)."""
 	removers = set(getRemovers())
+	emitters_set = set(getEmitters())
 	carbon = [(qty, dp) for b, yr, qty, pct, dp, ul, vs in bidder_year_rows if b == 'Carbon' and 2025.0 <= yr <= 2125.0 and dp is not None]
 	ag = [dp for b, yr, qty, pct, dp, ul, vs in bidder_year_rows if b == 'Agriculture' and 2025.0 <= yr <= 2125.0 and dp is not None]
 	removal = sum(qty * dp for b, yr, qty, pct, dp, ul, vs in bidder_year_rows if b in removers and 2025.0 <= yr <= 2125.0 and dp is not None)
+	emitters_pay = sum(qty * dp for b, yr, qty, pct, dp, ul, vs in bidder_year_rows if b in emitters_set and dp is not None)
+	removers_get = sum(qty * dp for b, yr, qty, pct, dp, ul, vs in bidder_year_rows if b in removers and dp is not None)
 	return (sum(dp for _, dp in carbon) / len(carbon) if carbon else None,
 		sum(ag) / len(ag) if ag else None,
 		sum(qty for qty, _ in carbon) / 1000.0 if carbon else None,
-		removal / 1_000_000.0)
+		removal / 1_000_000.0,
+		emitters_pay / 1_000_000.0,
+		removers_get / 1_000_000.0)
 
 def get_land_rent(scenario_id):
 	"""Return total_area * sum_t(pi(Forestry_Land_t)) in trillions for the given scenario.

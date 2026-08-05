@@ -4,7 +4,7 @@ Create SQLite database for SMDAMAGE CSV data. Produced by Claude with JFR's guid
 """
 # >>> Part I. Preliminaries, inputs, key parameters: create_database.py, database_interface.py, and defaults_and_utilities.py.
 # Part II. Getting pulse information from Hector: hector_interface.py.
-# Part III. SMDAMAGE: "SMDAMAGE revenue neutral.py"
+# Part III. SMDAMAGE: "smdamage_models.py"
 # Part IV. Running Hector on SMDAMAGE output. hector_interface.py.
 # =============================================================================================
 # Source data files. Create these files first. The function create_database() loads these to the SMDAMAGE database.

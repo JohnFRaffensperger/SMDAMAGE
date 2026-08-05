@@ -4,7 +4,7 @@
 # =============================================================================================
 # Part I. Preliminaries, inputs, key parameters: create_database.py, database_interface.py, and defaults_and_utilities.py.
 # Part II. Getting pulse information from Hector: hector_interface.py.
-# Part III. MAIN PROGRAM. "SMDAMAGE revenue neutral.py".
+# Part III. KEY PROGRAM smdamage_models.py.
 # Part IV. Running Hector on SMDAMAGE output: hector_interface.py. Called from the experiments here.
 # >>> Parts V, VI, and VII: experiments are in this file.
 # =============================================================================================
@@ -15,7 +15,7 @@ import hector_interface
 import plotting_utils
 import wpt_calibration
 import time
-from smdamage_models import run_SMDAMAGE, run_SMDAMAGE_short_auctions, run_SMDAMAGE_for_tau, get_SMDAMAGE_temps_actual_and_taxed
+from smdamage_models import run_SMDAMAGE, run_SMDAMAGE_short_auctions, run_SMDAMAGE_for_tau, get_SMDAMAGE_temps_actual_and_taxed, solve_smdamage_with_implicit_land_constraints
 
 if __name__ == "__main__":
 	# Preliminary: get pulses from Hector. Only needed if warming_factors table is empty.
@@ -157,9 +157,11 @@ if __name__ == "__main__":
 	# ----------------------------------------------------
 
 	# Table at end # estimate4_short_auctions_scenario_id = 21;
-	estimate1_LT_scenario_id = 5; estimate2_ST_scenario_id = 11;
+	# estimate1_LT_scenario_id = 5; estimate2_ST_scenario_id = 11;
 	# estimate3_weak_contracts_scenario_id = 17; estimate5_tau_search_scenario_id = 22
 	# plotting_utils.Summary_of_estimates_to_end_global_warming(defaults_and_utilities.getSolutionsDBPath(), estimate3_weak_contracts_scenario_id, estimate1_LT_scenario_id, estimate4_short_auctions_scenario_id, estimate2_ST_scenario_id, estimate5_tau_search_scenario_id, defaults_and_utilities.getOutputDirectory())
+
+	implicit_land_scenario_id = solve_smdamage_with_implicit_land_constraints(11)
 
 	print ("\nSMDAMAGE experiments are done. " + time.asctime(time.localtime(time.time())) + ". Reminder: convert $/ton C to $/ton CO2.")
 	# import winsound

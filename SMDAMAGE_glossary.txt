@@ -30,12 +30,12 @@ BUSCH_DB_DEFAULT: Default filesystem path to Busch forestry SQLite source DB in 
 BUSCH_DB_ENV_VAR: Environment variable name (BUSCH_SMDAMAGE_SQLITE) that can override Busch DB path. Used in <module>() in create_database.py (line 33).
 busch_db_path: Filesystem path used to locate busch db during run-time I/O. Used in load_forestry_from_busch_sqlite() in create_database.py (line 223).
 BUSCH_SMDAMAGE_SQLITE: Environment variable that points create_database.py to Busch forestry SQLite file. Used in <module>() in create_database.py (line 33).
-Calibrate W: Label for the Wpt calibration step that fits SMDAMAGE warming effects to Hector temperature trajectories. Used in get_SMDAMAGE_temps_actual_and_taxed() in SMDAMAGE revenue neutral.py (line 761).
+Calibrate W: Label for the Wpt calibration step that fits SMDAMAGE warming effects to Hector temperature trajectories. Used in get_SMDAMAGE_temps_actual_and_taxed() in smdamage_models.py (line 761).
 calibration: Calibration process or calibration result label. Used in save_fitted_wpt() in database_interface.py (line 177).
 calibration_scenario_id: Identifier field used to key calibration scenario records across related tables/joins. Used in save_fitted_wpt() in database_interface.py (line 176).
 carbon_removal_schedules: Collection of year-indexed carbon-removal schedules used for forestry calibration and simulation. Used in load_forestry_from_busch_sqlite() in create_database.py (line 241).
 cells: Spreadsheet-like cell data read from tabular input. Used in getHectorEmissionsDictionary() in hector_interface.py (line 166).
-Celsius/kg: Units note used in warming-kernel descriptions: temperature response per mass unit. Used in get_warming_effects() in SMDAMAGE revenue neutral.py (line 36).
+Celsius/kg: Units note used in warming-kernel descriptions: temperature response per mass unit. Used in get_warming_effects() in smdamage_models.py (line 36).
 chemical: Literal/model label 'Chemical' used as a symbolic name in database, optimization, or plotting logic. Used in load_chemical_pulses() in create_database.py (line 197).
 chemical_key: Dictionary key used to identify a chemical in pulse/emissions lookups. Used in getPulse() in database_interface.py (line 132).
 chemical_name: Name/label field storing chemical identity text used in joins and reporting. Used in load_chemical_pulses() in create_database.py (line 204).
@@ -62,7 +62,7 @@ database_interface.get_forestry_bidder_names: This function returns forestry bid
 database_interface.get_forestry_carbon_removal tree: Function-call composition term for fetching forestry carbon-removal schedules by tree bidder name.
 database_interface.get_scenario_id: This function returns the scenario id that matches a scenario name/tag in the solutions database. Used in getHectorEmissionsDictionary() in hector_interface.py (line 179).
 database_interface.get_scenario_id defaults_and_utilities.getSolutionsDBPath: This function returns the filesystem path to the solutions database smdamage_solutions.db.
-database_interface.getPulse: This function returns pulse-response temperature kernels loaded from warming_factors. Used in get_warming_effects() in SMDAMAGE revenue neutral.py (line 29).
+database_interface.getPulse: This function returns pulse-response temperature kernels loaded from warming_factors. Used in get_warming_effects() in smdamage_models.py (line 29).
 database_interface.py: Python module file for database interface. Used in <module>() in create_database.py (line 5).
 database_interface.save_fitted_wpt: This function saves fitted Wpt calibration values to fitted_wpt. Used in run_SMDAMAGE_fit_W() in wpt_calibration.py (line 198).
 database_interface.save_temperature_series getSolutionsDBPath: This function returns the filesystem path to the solutions database smdamage_solutions.db.
@@ -73,14 +73,14 @@ defaults_and_utilities.experimentTag_to_file_name: Name/label field storing expe
 defaults_and_utilities.experimentTag_to_file_name scenario: Filename derived from the scenario tag/settings.
 defaults_and_utilities.getBidPeriods: This function returns the time periods in which bids/auctions are active. Used in read_bids_from_database() in database_example.py (line 46).
 defaults_and_utilities.getChemicals: This function returns the list of modeled non-CO2 chemical emitters used in SMDAMAGE. Used in run_SMDAMAGE_fit_W() in wpt_calibration.py (line 45).
-defaults_and_utilities.getEmitters: This function returns the list of participants that emit greenhouse gases in the model. Used in get_warming_effects() in SMDAMAGE revenue neutral.py (line 30).
+defaults_and_utilities.getEmitters: This function returns the list of participants that emit greenhouse gases in the model. Used in get_warming_effects() in smdamage_models.py (line 30).
 defaults_and_utilities.getExperimentTag: This function builds a scenario experiment tag string used in filenames and run labeling. Used in getHectorEmissionsDictionary() in hector_interface.py (line 179).
 defaults_and_utilities.getExperimentTag scenario: Scenario-specific field for the active scenario.
 defaults_and_utilities.getLastBidYear: This function returns the final year in the bidding horizon. Used in getHectorEmissionsDictionary() in hector_interface.py (line 162).
 defaults_and_utilities.getModelPeriods: This function returns all model periods used for temperature accounting. Used in run_Hector_with_SMDAMAGE_solution() in hector_interface.py (line 262).
-defaults_and_utilities.getOutputDirectory: This function returns the output directory used for CSV/plot artifacts. Used in Solve_SMDAMAGE() in SMDAMAGE revenue neutral.py (line 198).
-defaults_and_utilities.getPulseDataLength: This function returns pulse-response temperature kernels loaded from warming_factors. Used in get_warming_effects() in SMDAMAGE revenue neutral.py (line 38).
-defaults_and_utilities.getRemovers: This function returns the list of participants that remove carbon dioxide. Used in get_warming_effects() in SMDAMAGE revenue neutral.py (line 31).
+defaults_and_utilities.getOutputDirectory: This function returns the output directory used for CSV/plot artifacts. Used in Solve_SMDAMAGE() in smdamage_models.py (line 198).
+defaults_and_utilities.getPulseDataLength: This function returns pulse-response temperature kernels loaded from warming_factors. Used in get_warming_effects() in smdamage_models.py (line 38).
+defaults_and_utilities.getRemovers: This function returns the list of participants that remove carbon dioxide. Used in get_warming_effects() in smdamage_models.py (line 31).
 defaults_and_utilities.getSolutionsDBPath: This function returns the filesystem path to the solutions database smdamage_solutions.db. Used in getHectorEmissionsDictionary() in hector_interface.py (line 179).
 defaults_and_utilities.getStartYear: This function returns the first year of the modeled auction schedule. Used in get_bid_and_price_info() in check_prices.py (line 42).
 defaults_and_utilities.getTreeTypes: This function returns the list of forestry tree-type bidder names from bidder tables in the project database. Used in run_SMDAMAGE_fit_W() in wpt_calibration.py (line 61).
@@ -96,12 +96,12 @@ dual_price: Dual value (shadow price) of a model constraint. Used in get_bid_and
 emission: Emissions quantity used to build or transform trajectories (emission). Used in getPulse() in database_interface.py (line 111).
 emission_factor: Emissions quantity used to build or transform trajectories (emission factor). Used in create_database() in create_database.py (line 71).
 emissionaValue: Emissions quantity used to build or transform trajectories (emissiona value). Used in getHectorEmissionsDictionary() in hector_interface.py (line 153).
-emissionperiod: Emissions quantity used to build or transform trajectories (emissionperiod). Used in get_warming_effects() in SMDAMAGE revenue neutral.py (line 43).
+emissionperiod: Emissions quantity used to build or transform trajectories (emissionperiod). Used in get_warming_effects() in smdamage_models.py (line 43).
 emissions: Emissions quantity used to build or transform trajectories (emissions). Used in <module>() in create_database.py (line 39).
 emissionsType: Emissions quantity used to build or transform trajectories (emissions type). Used in get_Pulses_from_Hector() in hector_interface.py (line 138).
 emissionsValue: Emissions quantity used to build or transform trajectories (emissions value). Used in get_Pulses_from_Hector() in hector_interface.py (line 138).
 experiment_tag: Human-readable scenario tag used in names and outputs. Used in getExperimentTag() in defaults_and_utilities.py (line 160).
-experiments: Top-level experiment sections in the main script. Used in <module>() in SMDAMAGE revenue neutral.py (line 10).
+experiments: Top-level experiment sections in the main script. Used in <module>() in smdamage_models.py (line 10).
 experimentTag_to_file_name: Name/label field storing experiment tag to file identity text used in joins and reporting. Used in SMDAMAGE_output_file_name() in defaults_and_utilities.py (line 83).
 Final_output_file: Filename token used when constructing/loading final output artifacts. Used in get_Pulses_from_Hector() in hector_interface.py (line 91).
 first_constrained_year: Year-indexed value used in period-based calculations (first constrained year). Used in getHectorEmissionsDictionary() in hector_interface.py (line 175).
@@ -194,14 +194,14 @@ load_chemical_pulses: This function loads chemical pulses from input files or th
 load_forestry_from_busch_sqlite: This function loads forestry data from Busch SQLite into SMDAMAGE tables. Used in create_database() in create_database.py (line 101).
 load_multi_column_bidders: This function loads multi column bidders from input files or the database. Used in create_database() in create_database.py (line 89).
 load_simple_bidders: This function loads simple bidders from input files or the database. Used in create_database() in create_database.py (line 88).
-lpt: LP model text file (debug export) label/path. Used in Solve_SMDAMAGE() in SMDAMAGE revenue neutral.py (line 244).
+lpt: LP model text file (debug export) label/path. Used in Solve_SMDAMAGE() in smdamage_models.py (line 244).
 luc: Land-use-change pathway indicator. Used in getExperimentTag() in defaults_and_utilities.py (line 165).
 max_growth_year: Year-indexed value used in period-based calculations (max growth year). Used in run_SMDAMAGE_fit_W() in wpt_calibration.py (line 169).
 MULTI_COLUMN_BIDDERS: Bid-side quantity used in bid curves, bidder metadata, or solved bidder-year outputs (multi column bidders). Used in <module>() in create_database.py (line 45).
 newtemplist: Literal/model label 'Newtemplist' used as a symbolic name in database, optimization, or plotting logic. Used in get_Pulses_from_Hector() in hector_interface.py (line 117).
 newyearlist: Year-indexed value used in period-based calculations (newyearlist). Used in get_Pulses_from_Hector() in hector_interface.py (line 117).
 npv_max_per_ha: Maximum net present value per hectare. Used in load_forestry_from_busch_sqlite() in create_database.py (line 265).
-Objective: Literal/model label 'Objective' used as a symbolic name in database, optimization, or plotting logic. Used in Solve_SMDAMAGE() in SMDAMAGE revenue neutral.py (line 218).
+Objective: Literal/model label 'Objective' used as a symbolic name in database, optimization, or plotting logic. Used in Solve_SMDAMAGE() in smdamage_models.py (line 218).
 objective_value: Solved objective value recorded for a scenario run. Used in ensure_solutions_db() in defaults_and_utilities.py (line 28).
 original_directory: Working directory saved before switching into the Hector run directory. Used in run_Hector_with_SMDAMAGE_solution() in hector_interface.py (line 238).
 originaltemplist: Literal/model label 'Originaltemplist' used as a symbolic name in database, optimization, or plotting logic. Used in get_Pulses_from_Hector() in hector_interface.py (line 97).
@@ -212,7 +212,7 @@ over_error_t: Positive residual variable (over-prediction error) by time index i
 participants: Literal/model label 'Participants' used as a symbolic name in database, optimization, or plotting logic. Used in Hector_output_file_name() in defaults_and_utilities.py (line 86).
 pct_max_bid: Bid-side quantity used in bid curves, bidder metadata, or solved bidder-year outputs (pct max bid). Used in _load_scenario_bidder_year() in check_solution.py (line 163).
 period: Model time period index/value. Used in read_bids_from_database() in database_example.py (line 51).
-plotting_utils: Plotting helper module for temperature and Wpt comparison figures. Used in <module>() in SMDAMAGE revenue neutral.py (line 17).
+plotting_utils: Plotting helper module for temperature and Wpt comparison figures. Used in <module>() in smdamage_models.py (line 17).
 pollutant: Pollutant/activity name used in model sets. Used in add_agriculture_bids_to_sets() in database_example.py (line 17).
 price_col: Column index for bid price in a source table. Used in <module>() in create_database.py (line 49).
 Pulse: Literal/model label 'Pulse' used as a symbolic name in database, optimization, or plotting logic. Used in get_pulse_data_from_database() in database_example.py (line 113).
@@ -237,7 +237,7 @@ removal_rows: Raw forestry removal rows loaded from Busch data. Used in load_for
 RemovalSchedules: Year-indexed removal schedules used in Wpt fitting. Used in run_SMDAMAGE_fit_W() in wpt_calibration.py (line 158).
 Removers: Literal/model label 'Removers' used as a symbolic name in database, optimization, or plotting logic. Used in Hector_output_file_name() in defaults_and_utilities.py (line 86).
 revenue: Revenue-accounting field used in objective/reporting and scenario metadata (revenue). Used in get_bid_and_price_info() in check_prices.py (line 69).
-rotation: Literal/model label 'Rotation' used as a symbolic name in database, optimization, or plotting logic. Used in Solve_SMDAMAGE() in SMDAMAGE revenue neutral.py (line 297).
+rotation: Literal/model label 'Rotation' used as a symbolic name in database, optimization, or plotting logic. Used in Solve_SMDAMAGE() in smdamage_models.py (line 297).
 rotation_year: Year-indexed value used in period-based calculations (rotation year). Used in create_database() in create_database.py (line 98).
 rows_by_bidder: Bid-side quantity used in bid curves, bidder metadata, or solved bidder-year outputs (rows by bidder). Used in load_forestry_from_busch_sqlite() in create_database.py (line 283).
 run_Hector_all_chemicals_pulsed.bat: Hector-run artifact/variable used in pulse or validation workflows (bat). Used in get_Pulses_from_Hector() in hector_interface.py (line 88).
@@ -246,7 +246,7 @@ save_fitted_wpt: This function saves fitted Wpt calibration values to fitted_wpt
 save_scenario_series: This function saves scenario time series to scenario_series. Used in save_scenario_series() in database_interface.py (line 217).
 save_temperature_series: This function saves temperature time series to temperature_series. Used in save_temperature_series() in database_interface.py (line 145).
 scale: Scale factor used to normalize units. Used in run_SMDAMAGE_fit_W() in wpt_calibration.py (line 126).
-scaleCelsius: Temperature scale factor (thousandths of degree C). Used in get_warming_effects() in SMDAMAGE revenue neutral.py (line 39).
+scaleCelsius: Temperature scale factor (thousandths of degree C). Used in get_warming_effects() in smdamage_models.py (line 39).
 scenario: Scenario-specific field for the active scenario. Used in get_bid_and_price_info() in check_prices.py (line 20).
 scenario_bidder_year: SQLite table in smdamage_solutions.db. Used in <module>() in check_solution.py (line 9).
 scenario_id: Identifier field used to key scenario records across related tables/joins. Used in get_bid_and_price_info() in check_prices.py (line 13).
@@ -265,12 +265,12 @@ signal: Pulse signal magnitude used for response estimation. Used in <module>() 
 SIMPLE_BIDDERS: Bid-side quantity used in bid curves, bidder metadata, or solved bidder-year outputs (simple bidders). Used in <module>() in create_database.py (line 36).
 SMDAMAGE: Literal/model label 'Smdamage' used as a symbolic name in database, optimization, or plotting logic. Used in get_bid_and_price_info() in check_prices.py (line 16).
 SMDAMAGE_emissions: Emissions quantity used to build or transform trajectories (smdamage emissions). Used in getHectorEmissionsDictionary() in hector_interface.py (line 153).
-SMDAMAGE_fit_W: Name of the Wpt calibration model/problem in wpt_calibration. Used in get_warming_effects() in SMDAMAGE revenue neutral.py (line 41).
+SMDAMAGE_fit_W: Name of the Wpt calibration model/problem in wpt_calibration. Used in get_warming_effects() in smdamage_models.py (line 41).
 smdamage_main: Reference to the main SMDAMAGE script/module entry workflow. Used in <module>() in wpt_calibration.py (line 21).
 smdamage_solutions.db: Primary solutions database storing scenarios, variables, duals, series, and calibration outputs. Used in <module>() in check_prices.py (line 10).
 SMDAMAGE_Temp: SMDAMAGE temperature trajectory variable used during Wpt fitting. Used in run_SMDAMAGE_fit_W() in wpt_calibration.py (line 142).
 SMDAMAGE_temp_t: Single-time-index SMDAMAGE temperature value used in fitting equations. Used in run_SMDAMAGE_fit_W() in wpt_calibration.py (line 118).
-solve_status: Solver outcome status for an optimization run. Used in Solve_SMDAMAGE() in SMDAMAGE revenue neutral.py (line 247).
+solve_status: Solver outcome status for an optimization run. Used in Solve_SMDAMAGE() in smdamage_models.py (line 247).
 source_tag: Source scenario tag used when loading linked outputs. Used in run_SMDAMAGE_fit_W() in wpt_calibration.py (line 75).
 start_year: Year-indexed value used in period-based calculations (start year). Used in get_bid_and_price_info() in check_prices.py (line 42).
 StartYear: Year-indexed value used in period-based calculations (start year). Used in add_agriculture_bids_to_sets() in database_example.py (line 9).
@@ -320,8 +320,8 @@ warming_data: Warming-kernel quantity used in Wpt equations/calibration (warming
 warming_factors: SQLite table in smdamage_data.db. Used in create_database() in create_database.py (line 71).
 hector_name: Name/label field storing hector identity text used in joins and reporting.
 Wpt_comparison_Carbon.svg: Warming-kernel quantity used in Wpt equations/calibration (svg). Used in plot_W_Hector_and_fitted() in plotting_utils.py (line 36).
-Wpt_dict: Dictionary of warming effects used by SMDAMAGE with keys (pollutant, lag) and temperature-effect values. Used in get_warming_effects() in SMDAMAGE revenue neutral.py (line 33).
-Wpt0: Warming-kernel quantity used in Wpt equations/calibration (wpt0). Used in get_warming_effects() in SMDAMAGE revenue neutral.py (line 36).
+Wpt_dict: Dictionary of warming effects used by SMDAMAGE with keys (pollutant, lag) and temperature-effect values. Used in get_warming_effects() in smdamage_models.py (line 33).
+Wpt0: Warming-kernel quantity used in Wpt equations/calibration (wpt0). Used in get_warming_effects() in smdamage_models.py (line 36).
 WRITE_LEGACY_FILES: This function toggles/writes legacy file outputs used by older workflows. Used in getTemperatureOutputPath() in defaults_and_utilities.py (line 19).
 write_legacy_files: This function toggles/writes legacy file outputs used by older workflows. Used in write_legacy_files() in defaults_and_utilities.py (line 20).
 write_SMDAMAGE_solution_to_Hector_input scenario: Scenario-specific field for the active scenario.
