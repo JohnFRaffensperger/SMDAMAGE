@@ -265,7 +265,7 @@ def save_solution_to_db(scenario, SMDAMAGE, vpt, qapt, Vname, temp_data=None, sc
 	forestry_meta = database_interface.get_forestry_contractdata()
 	land_rent = sum(meta['available_area_mhectares'] for meta in forestry_meta.values()) * sum((c.pi or 0.0) for name, c in SMDAMAGE.constraints.items() if name.startswith('Forestry_Land_')) / 1_000_000.0 # trillions
 	cursor.execute("INSERT INTO scenarios (name, discount_rate, initial_temp, tau, is_revenue_neutral, is_removal_luc, use_updated_Wpt, solver_status, net_revenue, land_rent, objective_value, solution_datetime, calibration_scenario, is_land_constraint_implicit) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-		(defaults_and_utilities.getExperimentTag(scenario), scenario.discount_rate_base, scenario.initial_temperature, scenario.tau, 1 if scenario.is_revenue_neutral else 0,
+		(defaults_and_utilities.getExperimentTag(scenario), scenario.discount_rate_base, scenario.initial_temperature, scenario.tau if scenario.is_revenue_neutral else None, 1 if scenario.is_revenue_neutral else 0,
 		1 if scenario.is_removal_luc else 0, 1 if scenario.use_updated_Wpt else 0, LpStatus[SMDAMAGE.status], net_revenue, land_rent, value(SMDAMAGE.objective) / 1_000_000.0, sol_datetime,
 		scenario.calibration_scenario_id, is_land_constraint_implicit))
 	scenario_id = cursor.lastrowid
@@ -659,8 +659,7 @@ def run_SMDAMAGE_short_auctions(years_in_auction, land_scale_factor, scenario):
 		all_Vname.update(Vname)
 		last_solve_status = solve_status
 		all_yearlyrevenue.update(yearlyrevenue)
-		c_land = SMDAMAGE.constraints[f"Forestry_Land_{float(startyear)}"]
-		if c_land: total_land_rent -= c_land.pi*c_land.constant  # dual Ã— (total_area - fixed_land[startyear])
+		total_land_rent += sum(-c.pi * c.constant for c_name, c in SMDAMAGE.constraints.items() if c_name.startswith('Forestry_Land_') and c.pi)
 
 	# Compute full temperature trajectories from Fixed_Vpt (all bid-period quantities accumulated above).
 	# full_temp: actual temperature; full_taxed_temp: emitter warming multiplied by tau (for the revenue-neutrality constraint).
@@ -681,7 +680,7 @@ def run_SMDAMAGE_short_auctions(years_in_auction, land_scale_factor, scenario):
 	conn = sqlite3.connect(db_path)
 	cursor = conn.cursor()
 	cursor.execute("INSERT INTO scenarios (name, discount_rate, initial_temp, tau, is_revenue_neutral, is_removal_luc, use_updated_Wpt, solver_status, net_revenue, land_rent, objective_value, solution_datetime, calibration_scenario, is_land_constraint_implicit) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-		(defaults_and_utilities.getExperimentTag(scenario), scenario.discount_rate_base, scenario.initial_temperature, scenario.tau,
+		(defaults_and_utilities.getExperimentTag(scenario), scenario.discount_rate_base, scenario.initial_temperature, scenario.tau if scenario.is_revenue_neutral else None,
 		 1 if scenario.is_revenue_neutral else 0, 1 if scenario.is_removal_luc else 0,
 		 1 if scenario.use_updated_Wpt else 0, last_solve_status, net_revenue, land_rent, total_objective / 1_000_000.0, solution_datetime,
 		 scenario.calibration_scenario_id, 0))

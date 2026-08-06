@@ -77,7 +77,7 @@ if __name__ == "__main__":
 	# Estimate 1 "Full commitment" long-term model, third party pays.
 	# estimate1_LT_scenario_id = run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Fig2", discount_rate = 0.03, initial_temperature = calibrated_initial_temperature,
 	# 	is_revenue_neutral = False, tau = primary_tau, is_removal_luc = False, use_updated_Wpt = True, calibration_scenario_id = figure1.calibration_scenario_id))
-	# s_id4 = run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Fig2", discount_rate = 0.06, initial_temperature = calibrated_initial_temperature,
+	s_id4 = run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Fig2", discount_rate = 0.06, initial_temperature = calibrated_initial_temperature,
 	# 	is_revenue_neutral = False, tau = primary_tau, is_removal_luc = False, use_updated_Wpt = True, calibration_scenario_id = figure1.calibration_scenario_id))
 
 	# Figure 2. Temperature trajectories with full commitment, a 2125 deadline, and 4 different discount rates.
