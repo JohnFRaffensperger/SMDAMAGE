@@ -222,3 +222,34 @@ def get_land_rent(scenario_id):
 	sum_pi = cursor.fetchone()[0]
 	conn.close()
 	return total_area * sum_pi / 1_000_000.0
+
+def print_results_text(scenario_id):
+	conn = sqlite3.connect(getSolutionsDBPath())
+	cursor = conn.cursor()
+	# TODO: if this was an implicit land area model, get the source source id and name.
+	cursor.execute("""SELECT id, name, discount_rate, tau, is_revenue_neutral, emitters_pay, removers_get, net_revenue, Avg_emitter_price_2025_2125,
+		Avg_remover_price_2025_2125, Emissions_2025_2125, is_land_constraint_implicit FROM scenarios WHERE id = ?""", (scenario_id,))
+	id, name, disc, tau, is_rev_neutral, emitters_pay, removers_get, net_revenue, emitter_price_C, remover_price_C, total_emissions, is_implicit = cursor.fetchone()
+	source_id = scenario_id
+	if is_implicit:
+		source_id = int(name.split(',')[0].split()[-1])
+		cursor.execute("SELECT name FROM scenarios WHERE id = ?", (source_id,))
+		source_name = cursor.fetchone()[0]
+	conn.close()
+	emitter_price_CO2 = round(emitter_price_C * 12.0/44.0, 2)
+	remover_price_CO2 = round(remover_price_C * 12.0/44.0, 2)
+	emitter_price_C, remover_price_C = round(emitter_price_C, 2), round(remover_price_C, 2)
+	final_text = f"{id}, {name}: For this case, with a {disc * 100:.4g}% discount rate, emitters pay about ${-emitters_pay:.2f} trillion over 100 years to carbon removers"
+	if is_implicit: final_text = f"Based on scenario {source_id}: {source_name}." + final_text
+	if is_rev_neutral:
+		final_text += f" with no third party payments. Emitters are carbon negative. Because emitters pay the surcharge τ = {tau} for drawdown,"
+		final_text += f" emitters face an average price of about ${-emitter_price_C:.2f}/tC (${-emitter_price_CO2:.2f}/tCO2)."
+		final_text += f" Removers face a price of ${remover_price_C:.2f}/tC (${remover_price_CO2:.2f}/tCO2)."
+		final_text += f" From 2025 to 2125, total carbon emissions are {total_emissions:.1f} GtC."
+	else:
+		final_text += f". Emitters are carbon neutral. The auction manager must find a third party to pay an additional ${net_revenue:.2f} trillion for drawdown."
+		final_text += f" Total drawdown therefore costs about ${removers_get:.2f} trillion."
+		final_text += f" Emitters and removers face an average price of about ${emitter_price_C:.2f}/tC (${emitter_price_CO2:.2f}/tCO2)."
+		final_text += f" From 2025 to 2125, total carbon emissions are {total_emissions:.1f} GtC."
+	return final_text
+# if __name__ == '__main__': print (print_results_text(11))

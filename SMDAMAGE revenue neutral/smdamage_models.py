@@ -363,6 +363,9 @@ def run_SMDAMAGE(scenario):
 	return scenario_id
 # END run_SMDAMAGE().
 
+# This function reads an existing solution for scenario_id, re-builds the linear program without the land constraints,
+# and sets upper bounds for forestry variables to their optimum for the existing solution.
+# Expect the same objective value, different prices, and different emissions.
 def solve_smdamage_with_implicit_land_constraints(scenario_id):
 	"""Rebuild the model for scenario_id with no land constraints; forestry qapt upper bounds fixed to DB optimal values."""
 	db_path = defaults_and_utilities.getSolutionsDBPath()
@@ -386,7 +389,7 @@ def solve_smdamage_with_implicit_land_constraints(scenario_id):
 
 	Wpt_dict = get_warming_effects(scenario)
 	Bapt, Uapt, APT_set, PT_set = read_bids(scenario)
-	Pollutants = sorted(list(set([p for p, t in PT_set])))
+	Activities = sorted(list(set([p for p, t in PT_set])))
 	BidStepSet = {}
 	for (p, t) in PT_set: BidStepSet[p, t] = []
 	TotalU = {(p, t): 0.0 for (p, t) in PT_set}
@@ -394,8 +397,8 @@ def solve_smdamage_with_implicit_land_constraints(scenario_id):
 		TotalU[p, t] += Uapt[a, p, t]
 		BidStepSet[p, t].append(a)
 
-	SMDAMAGE, qapt, vpt, temperatureChange, taxedTemperatureChange, Vname, solve_status = Solve_SMDAMAGE(
-		scenario, APT_set, PT_set, Bapt, Uapt, Wpt_dict, BidStepSet, Pollutants, forestry_fixed_ub=forestry_fixed_ub)
+	SMDAMAGE, qapt, vpt, temperatureChange, taxedTemperatureChange, Vname, solve_status \
+		= Solve_SMDAMAGE(scenario, APT_set, PT_set, Bapt, Uapt, Wpt_dict, BidStepSet, Activities, forestry_fixed_ub=forestry_fixed_ub)
 
 	yearlyrevenue = {t: 0.0 for t in defaults_and_utilities.getBidPeriods()}
 	for (p, t) in PT_set: yearlyrevenue[t] -= vpt[p, t].varValue * SMDAMAGE.constraints[Vname[(p, t)]].pi
@@ -403,7 +406,7 @@ def solve_smdamage_with_implicit_land_constraints(scenario_id):
 	Units = {b['bidder_name']: b['units'] for b in database_interface.get_bidders()}
 	bidder_year_rows = []
 	for t in defaults_and_utilities.getBidPeriods():
-		for p in Pollutants:
+		for p in Activities:
 			qty = vpt[p, t].varValue
 			pct = qty / TotalU[p, t] if TotalU[p, t] != 0.0 else None
 			dual = SMDAMAGE.constraints[Vname[(p, t)]].pi if Vname[(p, t)] in SMDAMAGE.constraints else None
@@ -425,7 +428,7 @@ def solve_smdamage_with_implicit_land_constraints(scenario_id):
 	print(f"Solve status {solve_status}. Objective ${value(SMDAMAGE.objective) / 1000:.2f} billion. 2125 temp {round(scenario.initial_temperature + temperatureChange[2125].varValue, 3)} thousandths C. Total time {time.time() - start_time:.1f}s.")
 	return new_scenario_id
 
-# Here's how the subgradient optimization works.
+# Here's how the subgradient optimization works (it's slow).
 def update_tau (old_temp, current_temp, old_tau, current_tau, step_size):
 	total_change = 0.0
 	new_tau = {t: 1.0 for t in old_tau}

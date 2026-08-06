@@ -272,8 +272,8 @@ def Price_trajectory_with_full_commitment (db_path, output_directory, scenario_i
 
 	years = sorted(series.keys())
 
-	# Converting $/ton carbon to $/ton carbon dioxide.
-	mplot.plot(years, [-series[year] * 44/12 for year in years], color='black', linestyle='-', linewidth=1.3)
+	# Converting $/ton carbon to $/ton carbon dioxide: × 12/44 (1 tCO2 contains 12/44 tC).
+	mplot.plot(years, [-series[year] * 12/44 for year in years], color='black', linestyle='-', linewidth=1.3)
 	ax = mplot.gca()
 	ax.tick_params(axis='both', which='major', labelsize=font_size)
 	ax.grid(True, which='major')
@@ -331,10 +331,10 @@ def Summary_of_estimates_to_end_global_warming(db_path, scenario_id_1, scenario_
 		third_party_pays.append(net_revenue if net_revenue is not None else None) # Already in trillions.
 
 		avg_emitter_price = _load_scalar(cursor, "SELECT AVG(dual_price) FROM scenario_bidder_year WHERE scenario_id = ? AND bidder = ? AND year >= ? AND year <= ?", (scenario_id, "Carbon", begin_year, end_year),)
-		average_emitter_price.append((avg_emitter_price, avg_emitter_price * 44.0 / 12.0) if avg_emitter_price is not None else (None, None)) # Convert $/C to $/CO2.
+		average_emitter_price.append((avg_emitter_price, avg_emitter_price * 12.0 / 44.0) if avg_emitter_price is not None else (None, None)) # Convert $/tC to $/tCO2.
 
 		avg_remover_price = _load_scalar(cursor, "SELECT AVG(dual_price) FROM scenario_bidder_year WHERE scenario_id = ? AND bidder = ? AND year >= ? AND year <= ?", (scenario_id, "Agriculture", begin_year, end_year),)
-		average_remover_price.append((avg_remover_price, avg_remover_price * 44.0 / 12.0) if avg_remover_price is not None else (None, None)) # Convert $/C to $/CO2.
+		average_remover_price.append((avg_remover_price, avg_remover_price * 12.0 / 44.0) if avg_remover_price is not None else (None, None)) # Convert $/tC to $/tCO2.
 
 		emissions = _load_scalar(cursor, "SELECT SUM(quantity_value) FROM scenario_bidder_year WHERE scenario_id = ? AND bidder = ? AND year >= ? AND year <= ?", (scenario_id, "Carbon", begin_year, end_year),)
 		emissions_2025_2125.append(emissions / 1000.0 if emissions is not None else None) # Convert mtC to gtC.

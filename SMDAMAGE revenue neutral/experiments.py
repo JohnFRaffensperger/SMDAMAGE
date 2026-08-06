@@ -161,8 +161,12 @@ if __name__ == "__main__":
 	# estimate3_weak_contracts_scenario_id = 17; estimate5_tau_search_scenario_id = 22
 	# plotting_utils.Summary_of_estimates_to_end_global_warming(defaults_and_utilities.getSolutionsDBPath(), estimate3_weak_contracts_scenario_id, estimate1_LT_scenario_id, estimate4_short_auctions_scenario_id, estimate2_ST_scenario_id, estimate5_tau_search_scenario_id, defaults_and_utilities.getOutputDirectory())
 
-	implicit_land_scenario_id = solve_smdamage_with_implicit_land_constraints(11)
-
+	# Solve the same scenario with implicit land constraints. The objective value should be the same, but prices and emissions will change.
+	# for scenario_id in range(1,11):
+	# 	implicit_land_scenario_id = solve_smdamage_with_implicit_land_constraints(scenario_id)
+	# 	print (defaults_and_utilities.print_results_text(implicit_land_scenario_id))
+	# TODO: Contracts 14 and 15 were done with the wrong initial temp, probably not correctly calibrated.
+	for scenario_id in range(25,36): print (defaults_and_utilities.print_results_text(scenario_id), "\n")
 	print ("\nSMDAMAGE experiments are done. " + time.asctime(time.localtime(time.time())) + ". Reminder: convert $/ton C to $/ton CO2.")
 	# import winsound
-	# winsound.Beep(700, 500)  # Just to let you know it's finally finished. Frequency 700 Hz, duration 500 ms
+	# winsound.Beep(700, 500)  # Just to let you know it's finally finished. Frequency 700 Hz, duration 500 ms.
