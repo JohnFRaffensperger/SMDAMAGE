@@ -53,7 +53,7 @@ def plot_temps_Hector_and_fitted(scenario, Hector_temp, fit_temp, years, getOutp
 	# mplot.savefig(getOutputDirectory() + "Temp_comparison_fittedW.svg")
 	# mplot.show()
 
-# Figure 1 in the paper. TODO: need to pass the scenarios better.
+# Figure 1 in the paper.
 def Uncalibrated_and_calibrated_temperature_trajectories(db_path, output_directory, scenario_id_uncalibrated, scenario_id_calibrated, scenario_id_hector):
 	"""Plot uncalibrated and calibrated SMDAMAGE trajectories with calibrated Hector trajectory."""
 	font_size = 7

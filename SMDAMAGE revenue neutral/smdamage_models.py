@@ -428,6 +428,73 @@ def solve_smdamage_with_implicit_land_constraints(scenario_id):
 	print(f"Solve status {solve_status}. Objective ${value(SMDAMAGE.objective) / 1000:.2f} billion. 2125 temp {round(scenario.initial_temperature + temperatureChange[2125].varValue, 3)} thousandths C. Total time {time.time() - start_time:.1f}s.")
 	return new_scenario_id
 
+def solve_smdamage_with_implicit_land_constraints_for_tau_search(scenario_id):
+	"""Like solve_smdamage_with_implicit_land_constraints, but loads the saved dynamic tau[t] series from run_SMDAMAGE_for_tau."""
+	db_path = defaults_and_utilities.getSolutionsDBPath()
+	defaults_and_utilities.ensure_solutions_db()
+	start_time = time.time()
+	params = database_interface.get_scenario_full_params(db_path, scenario_id)
+	scenario = defaults_and_utilities.Scenario(
+		comment=f"Implicit land {scenario_id}",
+		discount_rate=params['discount_rate'],
+		initial_temperature=params['initial_temp'],
+		is_revenue_neutral=bool(params['is_revenue_neutral']),
+		tau=params['tau'],
+		is_removal_luc=bool(params['is_removal_luc']),
+		use_updated_Wpt=bool(params['use_updated_Wpt']),
+		calibration_scenario_id=params['calibration_scenario'])
+	print(f"\nSMDAMAGE implicit land constraints (tau search), source scenario {scenario_id}. {time.asctime(time.localtime(time.time()))}.")
+
+	tau_series_name = "SMDAMAGE tau calibrated" if params['use_updated_Wpt'] else "SMDAMAGE tau uncalibrated"
+	tau_series = database_interface.get_scenario_series(db_path, scenario_id, tau_series_name)
+	if not tau_series: raise ValueError(f"No tau series '{tau_series_name}' found for scenario {scenario_id}. Was it produced by run_SMDAMAGE_for_tau?")
+
+	forestry_bidder_names = set(database_interface.get_forestry_bidder_names())
+	all_qapt = database_interface.get_qapt_values_from_db(db_path, scenario_id)
+	forestry_fixed_ub = {(a, p, t): v for (a, p, t), v in all_qapt.items() if p in forestry_bidder_names}
+
+	Wpt_dict = get_warming_effects(scenario)
+	Bapt, Uapt, APT_set, PT_set = read_bids(scenario)
+	Activities = sorted(list(set([p for p, t in PT_set])))
+	BidStepSet = {}
+	for (p, t) in PT_set: BidStepSet[p, t] = []
+	TotalU = {(p, t): 0.0 for (p, t) in PT_set}
+	for (a, p, t) in APT_set:
+		TotalU[p, t] += Uapt[a, p, t]
+		BidStepSet[p, t].append(a)
+
+	SMDAMAGE, qapt, vpt, temperatureChange, taxedTemperatureChange, Vname, solve_status \
+		= Solve_SMDAMAGE(scenario, APT_set, PT_set, Bapt, Uapt, Wpt_dict, BidStepSet, Activities, tau_override=tau_series, tau_mode="dynamic", forestry_fixed_ub=forestry_fixed_ub)
+
+	yearlyrevenue = {t: 0.0 for t in defaults_and_utilities.getBidPeriods()}
+	for (p, t) in PT_set: yearlyrevenue[t] -= vpt[p, t].varValue * SMDAMAGE.constraints[Vname[(p, t)]].pi
+
+	Units = {b['bidder_name']: b['units'] for b in database_interface.get_bidders()}
+	bidder_year_rows = []
+	for t in defaults_and_utilities.getBidPeriods():
+		for p in Activities:
+			qty = vpt[p, t].varValue
+			pct = qty / TotalU[p, t] if TotalU[p, t] != 0.0 else None
+			dual = SMDAMAGE.constraints[Vname[(p, t)]].pi if Vname[(p, t)] in SMDAMAGE.constraints else None
+			bidder_year_rows.append((p, t, qty, pct, dual, Units[p], "derived"))
+
+	temp_data = {"SMDAMAGE Carbon calibrated" if scenario.use_updated_Wpt else "SMDAMAGE Carbon uncalibrated": {t: vpt['Carbon', t].varValue for t in defaults_and_utilities.getBidPeriods()},
+		"SMDAMAGE yearly revenue calibrated" if scenario.use_updated_Wpt else "SMDAMAGE yearly revenue uncalibrated": yearlyrevenue,
+		"SMDAMAGE actual temp calibrated" if scenario.use_updated_Wpt else "SMDAMAGE actual temp uncalibrated": {t: scenario.initial_temperature + temperatureChange[t].varValue for t in defaults_and_utilities.getBidPeriods()}}
+	if scenario.is_revenue_neutral: temp_data["SMDAMAGE taxed temp calibrated" if scenario.use_updated_Wpt else "SMDAMAGE taxed temp uncalibrated"] = {t: scenario.initial_temperature + taxedTemperatureChange[t].varValue for t in defaults_and_utilities.getBidPeriods()}
+
+	actual_source = "SMDAMAGE actual temp calibrated" if scenario.use_updated_Wpt else "SMDAMAGE actual temp uncalibrated"
+	scenario_series_entries = [(actual_source, {t: scenario.initial_temperature + temperatureChange[t].varValue for t in defaults_and_utilities.getModelPeriods()}, "thousandths_C")]
+	if scenario.is_revenue_neutral:
+		taxed_source = "SMDAMAGE taxed temp calibrated" if scenario.use_updated_Wpt else "SMDAMAGE taxed temp uncalibrated"
+		scenario_series_entries.append((taxed_source, {t: scenario.initial_temperature + taxedTemperatureChange[t].varValue for t in defaults_and_utilities.getModelPeriods()}, "thousandths_C"))
+	scenario_series_entries.append((tau_series_name, tau_series, "ratio"))
+	scenario_series_entries.append(("Forestry carbon", defaults_and_utilities.get_tree_schedule_carbon_removal({k: v.varValue for k, v in vpt.items()}), "mtC"))
+
+	new_scenario_id = save_solution_to_db(scenario, SMDAMAGE, vpt, qapt, Vname, temp_data, scenario_series_entries, bidder_year_rows, is_land_constraint_implicit=1)
+	print(f"Solve status {solve_status}. Objective ${value(SMDAMAGE.objective) / 1000:.2f} billion. 2125 temp {round(scenario.initial_temperature + temperatureChange[2125].varValue, 3)} thousandths C. Total time {time.time() - start_time:.1f}s.")
+	return new_scenario_id
+
 # Here's how the subgradient optimization works (it's slow).
 def update_tau (old_temp, current_temp, old_tau, current_tau, step_size):
 	total_change = 0.0

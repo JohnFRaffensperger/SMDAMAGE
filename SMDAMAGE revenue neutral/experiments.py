@@ -15,7 +15,7 @@ import hector_interface
 import plotting_utils
 import wpt_calibration
 import time
-from smdamage_models import run_SMDAMAGE, run_SMDAMAGE_short_auctions, run_SMDAMAGE_for_tau, get_SMDAMAGE_temps_actual_and_taxed, solve_smdamage_with_implicit_land_constraints
+from smdamage_models import run_SMDAMAGE, run_SMDAMAGE_short_auctions, run_SMDAMAGE_for_tau, get_SMDAMAGE_temps_actual_and_taxed, solve_smdamage_with_implicit_land_constraints, solve_smdamage_with_implicit_land_constraints_for_tau_search
 
 if __name__ == "__main__":
 	# Preliminary: get pulses from Hector. Only needed if warming_factors table is empty.
@@ -60,7 +60,7 @@ if __name__ == "__main__":
 
 	# Figure 1. Uncalibrated and calibrated temperature trajectories. SVG file.
 	fig1_Wpt_default_scenario_id = 1; fig1_Wpt_fitted_scenario_id = 2
-	plotting_utils.Uncalibrated_and_calibrated_temperature_trajectories(defaults_and_utilities.getSolutionsDBPath(), defaults_and_utilities.getOutputDirectory(), fig1_Wpt_default_scenario_id, fig1_Wpt_fitted_scenario_id, fig1_Wpt_fitted_scenario_id)
+	# plotting_utils.Uncalibrated_and_calibrated_temperature_trajectories(defaults_and_utilities.getSolutionsDBPath(), defaults_and_utilities.getOutputDirectory(), fig1_Wpt_default_scenario_id, fig1_Wpt_fitted_scenario_id, fig1_Wpt_fitted_scenario_id)
 
 	# ----------------------------------------------------
 	# # V.C. Robustness to discount rate. SMDAMAGE_0 calibrated to scenario 1. Tau is irrelevant.
@@ -77,7 +77,7 @@ if __name__ == "__main__":
 	# Estimate 1 "Full commitment" long-term model, third party pays.
 	# estimate1_LT_scenario_id = run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Fig2", discount_rate = 0.03, initial_temperature = calibrated_initial_temperature,
 	# 	is_revenue_neutral = False, tau = primary_tau, is_removal_luc = False, use_updated_Wpt = True, calibration_scenario_id = figure1.calibration_scenario_id))
-	s_id4 = run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Fig2", discount_rate = 0.06, initial_temperature = calibrated_initial_temperature,
+	# s_id4 = run_SMDAMAGE(defaults_and_utilities.Scenario(comment = "Fig2", discount_rate = 0.06, initial_temperature = calibrated_initial_temperature,
 	# 	is_revenue_neutral = False, tau = primary_tau, is_removal_luc = False, use_updated_Wpt = True, calibration_scenario_id = figure1.calibration_scenario_id))
 
 	# Figure 2. Temperature trajectories with full commitment, a 2125 deadline, and 4 different discount rates.
@@ -125,9 +125,11 @@ if __name__ == "__main__":
 	# contracts_scenario.initial_temperature = wpt_calibration.run_SMDAMAGE_fit_W(contracts_scenario)
 
 	# # # VI.C. Run the auction with weak contracts, discount_rate 0.03, initial_temperature from the first calibration, is_revenue_neutral True, tau is 2.6, is_removal_luc to True, use_updated_Wpt = True.
+	# Apologies, I haven't designed a convenient way to specify the calibration scenario, so it's easy to get wrong.
 	# contracts_scenario.use_updated_Wpt = True
 	# contracts_scenario.calibration_scenario_id = 12 # calibration_scenario_id # Use the scenario just done to look up Wpt from smdamage_solutions.fitted_wpt
-	# contracts_scenario.tau = 3.5 # not high enough!
+	# contracts_scenario.initial_temperature = database_interface.get_calibrated_initial_temp(contracts_scenario)
+	# contracts_scenario.tau = 3.2 # not high enough!
 	# estimate3_weak_contracts_scenario_id = run_SMDAMAGE(contracts_scenario) # calibrated to luc warming coefficients.
 	# hector_interface.run_Hector_with_SMDAMAGE_solution(contracts_scenario)
 	# Nice-to-have jpg.
@@ -165,8 +167,8 @@ if __name__ == "__main__":
 	# for scenario_id in range(1,11):
 	# 	implicit_land_scenario_id = solve_smdamage_with_implicit_land_constraints(scenario_id)
 	# 	print (defaults_and_utilities.print_results_text(implicit_land_scenario_id))
-	# TODO: Contracts 14 and 15 were done with the wrong initial temp, probably not correctly calibrated.
-	for scenario_id in range(25,36): print (defaults_and_utilities.print_results_text(scenario_id), "\n")
-	print ("\nSMDAMAGE experiments are done. " + time.asctime(time.localtime(time.time())) + ". Reminder: convert $/ton C to $/ton CO2.")
+	implicit_land_scenario_id = solve_smdamage_with_implicit_land_constraints_for_tau_search(24)
+	print (defaults_and_utilities.print_results_text(implicit_land_scenario_id), "\n")
+	# print ("\nSMDAMAGE experiments are done. " + time.asctime(time.localtime(time.time())) + ". Reminder: convert $/ton C to $/ton CO2.")
 	# import winsound
 	# winsound.Beep(700, 500)  # Just to let you know it's finally finished. Frequency 700 Hz, duration 500 ms.

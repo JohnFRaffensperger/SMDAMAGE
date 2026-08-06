@@ -226,7 +226,6 @@ def get_land_rent(scenario_id):
 def print_results_text(scenario_id):
 	conn = sqlite3.connect(getSolutionsDBPath())
 	cursor = conn.cursor()
-	# TODO: if this was an implicit land area model, get the source source id and name.
 	cursor.execute("""SELECT id, name, discount_rate, tau, is_revenue_neutral, emitters_pay, removers_get, net_revenue, Avg_emitter_price_2025_2125,
 		Avg_remover_price_2025_2125, Emissions_2025_2125, is_land_constraint_implicit FROM scenarios WHERE id = ?""", (scenario_id,))
 	id, name, disc, tau, is_rev_neutral, emitters_pay, removers_get, net_revenue, emitter_price_C, remover_price_C, total_emissions, is_implicit = cursor.fetchone()
