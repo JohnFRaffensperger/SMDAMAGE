@@ -15,7 +15,7 @@ import hector_interface
 import plotting_utils
 import wpt_calibration
 import time
-from smdamage_models import run_SMDAMAGE, run_SMDAMAGE_short_auctions, run_SMDAMAGE_for_tau, get_SMDAMAGE_temps_actual_and_taxed, solve_smdamage_with_implicit_land_constraints, solve_smdamage_with_implicit_land_constraints_for_tau_search
+from smdamage_models import run_SMDAMAGE, run_SMDAMAGE_short_auctions, run_SMDAMAGE_for_tau, get_SMDAMAGE_temps_actual_and_taxed, solve_smdamage_with_implicit_land_constraints, solve_smdamage_with_implicit_land_constraints_for_tau_search, run_SMDAMAGE_short_auctions_implicit_land_constraints
 
 if __name__ == "__main__":
 	# Preliminary: get pulses from Hector. Only needed if warming_factors table is empty.
@@ -164,11 +164,11 @@ if __name__ == "__main__":
 	# plotting_utils.Summary_of_estimates_to_end_global_warming(defaults_and_utilities.getSolutionsDBPath(), estimate3_weak_contracts_scenario_id, estimate1_LT_scenario_id, estimate4_short_auctions_scenario_id, estimate2_ST_scenario_id, estimate5_tau_search_scenario_id, defaults_and_utilities.getOutputDirectory())
 
 	# Solve the same scenario with implicit land constraints. The objective value should be the same, but prices and emissions will change.
-	# for scenario_id in range(1,11):
-	# 	implicit_land_scenario_id = solve_smdamage_with_implicit_land_constraints(scenario_id)
-	# 	print (defaults_and_utilities.print_results_text(implicit_land_scenario_id))
-	implicit_land_scenario_id = solve_smdamage_with_implicit_land_constraints_for_tau_search(24)
-	print (defaults_and_utilities.print_results_text(implicit_land_scenario_id), "\n")
+	for scenario_id in range(16,24):
+		implicit_land_scenario_id = solve_smdamage_with_implicit_land_constraints(scenario_id)
+		print (defaults_and_utilities.print_results_text(implicit_land_scenario_id))
+	# implicit_land_scenario_id = solve_smdamage_with_implicit_land_constraints_for_tau_search(24)
+	print ("\n", defaults_and_utilities.print_results_text(implicit_land_scenario_id))
 	# print ("\nSMDAMAGE experiments are done. " + time.asctime(time.localtime(time.time())) + ". Reminder: convert $/ton C to $/ton CO2.")
 	# import winsound
 	# winsound.Beep(700, 500)  # Just to let you know it's finally finished. Frequency 700 Hz, duration 500 ms.

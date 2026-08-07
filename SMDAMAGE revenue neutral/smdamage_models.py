@@ -777,6 +777,159 @@ def run_SMDAMAGE_short_auctions(years_in_auction, land_scale_factor, scenario):
 	return scenario_id
 # END run_SMDAMAGE_short_auctions().
 
+def run_SMDAMAGE_short_auctions_implicit_land_constraints(source_scenario_id):
+	"""Replay a run_SMDAMAGE_short_auctions scenario auction-by-auction with no land constraints; forestry qapt UBs fixed to DB optimal values."""
+	db_path = defaults_and_utilities.getSolutionsDBPath()
+	defaults_and_utilities.ensure_solutions_db()
+	start_time = time.time()
+	conn0 = sqlite3.connect(db_path)
+	source_name = conn0.execute("SELECT name FROM scenarios WHERE id = ?", (source_scenario_id,)).fetchone()[0]
+	conn0.close()
+	years_in_auction = int(source_name.split('yrs')[0].split()[-1])
+	params = database_interface.get_scenario_full_params(db_path, source_scenario_id)
+	scenario = defaults_and_utilities.Scenario(
+		comment=f"Implicit land {source_scenario_id}",
+		discount_rate=params['discount_rate'],
+		initial_temperature=params['initial_temp'],
+		is_revenue_neutral=bool(params['is_revenue_neutral']),
+		tau=params['tau'],
+		is_removal_luc=bool(params['is_removal_luc']),
+		use_updated_Wpt=bool(params['use_updated_Wpt']),
+		calibration_scenario_id=params['calibration_scenario'])
+	print(f"\nSMDAMAGE_2 implicit land, source scenario {source_scenario_id}, {years_in_auction}yr auctions. {time.asctime(time.localtime(time.time()))}.")
+
+	forestry_bidder_names = set(database_interface.get_forestry_bidder_names())
+	all_qapt_db = database_interface.get_qapt_values_from_db(db_path, source_scenario_id)
+	forestry_fixed_ub_all = {(a, p, t): v for (a, p, t), v in all_qapt_db.items() if p in forestry_bidder_names}
+
+	AllBidPeriods = defaults_and_utilities.getBidPeriods()
+	Wpt_dict = get_warming_effects(scenario)
+	Bapt, Uapt, APT_set, PT_set = read_bids(scenario)
+	Pollutants = sorted(list(set([p for p, t in PT_set])))
+	BidStepSet = {}
+	for (p, t) in PT_set: BidStepSet[p, t] = []
+	TotalU = {(p, t): 0.0 for (p, t) in PT_set}
+	for (a, p, t) in APT_set:
+		TotalU[p, t] += Uapt[a, p, t]
+		BidStepSet[p, t].append(a)
+	Units = {b['bidder_name']: b['units'] for b in database_interface.get_bidders()}
+	Emitters = defaults_and_utilities.getEmitters()
+	FixedPeriods = []
+	Fixed_Vpt = {(p, t): 0.0 for (p, t) in PT_set}
+	all_qapt_rows = []
+	all_duals = {}
+	total_objective = 0.0
+	all_vpt_values = {}
+	all_Vname = {}
+	all_yearlyrevenue = {}
+	last_solve_status = "Not solved"
+	solution_datetime = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+	for startyear in range(int(min(AllBidPeriods)), int(max(AllBidPeriods)) - years_in_auction, years_in_auction):
+		BidPeriods = [float(startyear + i) for i in range(years_in_auction)]
+		forestry_ub_period = {(a, p, t): v for (a, p, t), v in forestry_fixed_ub_all.items() if t in BidPeriods}
+
+		qapt = {(a, p, t): LpVariable("qapt(" + str(a) + "," + p + "," + str(t) + ")", 0.0,
+			forestry_ub_period.get((a, p, t), 0.0) if p in forestry_bidder_names else Uapt[a, p, t])
+			for (a, p, t) in APT_set if t in BidPeriods}
+		vpt = {(p, t): LpVariable("vpt(" + p + "," + str(t) + ")", None, None) for (p, t) in PT_set if t in BidPeriods}
+
+		BeginConstraintYear = int(defaults_and_utilities.getFirstConstrainedYear())
+		ConstraintPeriods = [float(BeginConstraintYear) + float(t)/float(hector_interface.getPeriodsPerYear()) for t in range(hector_interface.getPeriodsPerYear()*(defaults_and_utilities.getPulseDataLength() + int(defaults_and_utilities.getStartYear()) - int(BeginConstraintYear)))]
+
+		SMDAMAGE = LpProblem("SMDAMAGE", LpMaximize)
+		SMDAMAGE += defaults_and_utilities.inflate_2020_to_2025() * lpSum(Bapt[a, p, t] * qapt[a, p, t] for (a, p, t) in APT_set if t in BidPeriods), "Total value"
+
+		# No land constraint (implicit).
+
+		Vname = {}
+		for (p, t) in PT_set:
+			if t in BidPeriods:
+				Vname[(p, t)] = "Vpt(" + p + "," + str(t) + ")"
+				SMDAMAGE += vpt[p, t] == lpSum([qapt[a, p, t] for a in BidStepSet[p, t]]), Vname[(p, t)]
+
+		temperatureChange = {t: LpVariable("tempChange(" + str(t) + ")", None, None) for t in defaults_and_utilities.getModelPeriods()[len(FixedPeriods):]}
+		for t in defaults_and_utilities.getModelPeriods()[len(FixedPeriods):]:
+			SMDAMAGE += lpSum(sum([Wpt_dict[(p, float(t - u))] * Fixed_Vpt[p, u] for (p, u) in PT_set if u <= t and u in FixedPeriods]
+				+ [Wpt_dict[(p, float(t - u))] * vpt[p, u] for (p, u) in PT_set if u <= t and u in BidPeriods]) - temperatureChange[t]) == 0, "Temp_t(" + str(t) + ")"
+
+		taxedTemperatureChange = {t: LpVariable("taxedTempChange(" + str(t) + ")", None, None) for t in defaults_and_utilities.getModelPeriods()[len(FixedPeriods):]}
+		FixedPeriods_set = set(FixedPeriods)
+		for t in defaults_and_utilities.getModelPeriods()[len(FixedPeriods):]:
+			SMDAMAGE += lpSum(
+				[scenario.tau * Wpt_dict[(p, t - u)] * vpt[p, u] for (p, u) in PT_set if p in Emitters and u <= t and u in BidPeriods and u <= 1 + BeginConstraintYear]
+				+ [Wpt_dict[(p, t - u)] * vpt[p, u] for (p, u) in PT_set if p in Emitters and u <= t and u in BidPeriods and u >= BeginConstraintYear]
+				+ [Wpt_dict[(p, t - u)] * vpt[p, u] for (p, u) in PT_set if p not in Emitters and u <= t and u in BidPeriods]) \
+				- taxedTemperatureChange[t] \
+				+ sum([scenario.tau * Wpt_dict[(p, float(t - u))] * Fixed_Vpt[p, u] for (p, u) in PT_set if p in Emitters and u <= t and u in FixedPeriods_set and u <= 1 + BeginConstraintYear]) \
+				+ sum([Wpt_dict[(p, float(t - u))] * Fixed_Vpt[p, u] for (p, u) in PT_set if p in Emitters and u <= t and u in FixedPeriods_set and u >= BeginConstraintYear]) \
+				+ sum([Wpt_dict[(p, float(t - u))] * Fixed_Vpt[p, u] for (p, u) in PT_set if p not in Emitters and u <= t and u in FixedPeriods_set]) \
+				== 0, "TaxedTemp_t(" + str(t) + ")"
+		for t in ConstraintPeriods:
+			if t not in FixedPeriods: SMDAMAGE += taxedTemperatureChange[t] <= 0.0, "Capt(" + str(t) + ")"
+
+		solve_status = LpStatus[SMDAMAGE.solve(PULP_CBC_CMD(threads=8, msg=0))]
+		print(f"SMDAMAGE_2 implicit land, solve status {solve_status}. Objective ${value(SMDAMAGE.objective) / 1000:.2f} billion. Start year {startyear}, tau={scenario.tau}, {round(scenario.initial_temperature + temperatureChange[float(startyear + years_in_auction - 1)].varValue, 3)} 000C.")
+		if solve_status == "Infeasible": SMDAMAGE.writeLP(defaults_and_utilities.getOutputDirectory() + defaults_and_utilities.getExperimentTag(scenario) + "_" + str(startyear) + ".lpt")
+
+		FixedPeriods = FixedPeriods + BidPeriods
+		yearlyrevenue = {t: 0.0 for t in BidPeriods}
+		for (p, t) in PT_set:
+			if t in BidPeriods:
+				Fixed_Vpt[(p, t)] = vpt[p, t].varValue
+				yearlyrevenue[t] -= vpt[p, t].varValue * SMDAMAGE.constraints[Vname[(p, t)]].pi
+		all_qapt_rows.extend([(p, t, a, var.varValue) for (a, p, t), var in qapt.items() if var.varValue != 0.0])
+		all_duals.update({c_name: c.pi for c_name, c in SMDAMAGE.constraints.items() if c.pi != 0.0})
+		total_objective += value(SMDAMAGE.objective)
+		all_vpt_values.update({(p, t): vpt[p, t].varValue for (p, t) in vpt})
+		all_Vname.update(Vname)
+		last_solve_status = solve_status
+		all_yearlyrevenue.update(yearlyrevenue)
+
+	Emitters_set = set(Emitters)
+	full_temp = {t: scenario.initial_temperature + sum(Wpt_dict.get((p, float(t - u)), 0.0) * Fixed_Vpt[(p, u)] for (p, u) in PT_set if u <= t) for t in defaults_and_utilities.getModelPeriods()}
+	if scenario.is_revenue_neutral:
+		full_taxed_temp = {t: scenario.initial_temperature + sum((scenario.tau if p in Emitters_set else 1.0) * Wpt_dict.get((p, float(t - u)), 0.0) * Fixed_Vpt[(p, u)] for (p, u) in PT_set if u <= t) for t in defaults_and_utilities.getModelPeriods()}
+	bidder_year_rows = [(p, t, all_vpt_values.get((p, t), 0.0),
+		all_vpt_values.get((p, t), 0.0) / TotalU[p, t] if TotalU[p, t] != 0.0 else None,
+		all_duals.get(all_Vname[(p, t)], 0.0) if (p, t) in all_Vname else None, Units[p], "derived")
+		for t in defaults_and_utilities.getBidPeriods() for p in Pollutants]
+
+	net_revenue = -sum(all_vpt_values[(p, t)] * all_duals.get(all_Vname[(p, t)], 0.0) for (p, t) in all_Vname) / 1_000_000.0
+	conn = sqlite3.connect(db_path)
+	cursor = conn.cursor()
+	cursor.execute("INSERT INTO scenarios (name, discount_rate, initial_temp, tau, is_revenue_neutral, is_removal_luc, use_updated_Wpt, solver_status, net_revenue, land_rent, objective_value, solution_datetime, calibration_scenario, is_land_constraint_implicit) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+		(defaults_and_utilities.getExperimentTag(scenario), scenario.discount_rate_base, scenario.initial_temperature, scenario.tau if scenario.is_revenue_neutral else None,
+		 1 if scenario.is_revenue_neutral else 0, 1 if scenario.is_removal_luc else 0,
+		 1 if scenario.use_updated_Wpt else 0, last_solve_status, net_revenue, 0.0, total_objective / 1_000_000.0, solution_datetime,
+		 scenario.calibration_scenario_id, 1))
+	new_scenario_id = cursor.lastrowid
+	assert new_scenario_id, "Failed to insert implicit-land short-auctions scenario."
+	if all_qapt_rows: cursor.executemany("INSERT INTO variables (scenario_id, bidder, year, bid_step, value) VALUES (?,?,?,?,?) ON CONFLICT(scenario_id, bidder, year, bid_step) DO UPDATE SET value=excluded.value",
+		[(new_scenario_id, p, t, a, val) for p, t, a, val in all_qapt_rows])
+	if all_duals: cursor.executemany("INSERT INTO constraint_duals (scenario_id, constraint_name, pi) VALUES (?,?,?) ON CONFLICT(scenario_id, constraint_name) DO UPDATE SET pi=excluded.pi",
+		[(new_scenario_id, c_name, pi) for c_name, pi in all_duals.items()])
+	actual_source = "SMDAMAGE actual temp calibrated" if scenario.use_updated_Wpt else "SMDAMAGE actual temp uncalibrated"
+	series_entries = [(actual_source, full_temp, "thousandths_C"),
+		("SMDAMAGE yearly revenue " + ("calibrated" if scenario.use_updated_Wpt else "uncalibrated"), all_yearlyrevenue, None),
+		("Forestry carbon", defaults_and_utilities.get_tree_schedule_carbon_removal(Fixed_Vpt), "mtC")]
+	if scenario.is_revenue_neutral:
+		taxed_source = "SMDAMAGE taxed temp calibrated" if scenario.use_updated_Wpt else "SMDAMAGE taxed temp uncalibrated"
+		series_entries.append((taxed_source, full_taxed_temp, "thousandths_C"))
+	for series_name, year_to_value, units in series_entries:
+		cursor.executemany("INSERT INTO scenario_series (scenario_id, series_name, year, value, units, series_source) VALUES (?,?,?,?,?,?) ON CONFLICT(scenario_id, series_name, year) DO UPDATE SET value=excluded.value, units=excluded.units, series_source=excluded.series_source",
+			[(new_scenario_id, series_name, float(year), val, units, 'SMDAMAGE') for year, val in year_to_value.items()])
+	if bidder_year_rows: cursor.executemany("INSERT INTO scenario_bidder_year (scenario_id, bidder, year, quantity_value, pct_max_bid, dual_price, unit_label, value_source) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(scenario_id, bidder, year) DO UPDATE SET quantity_value=excluded.quantity_value, pct_max_bid=excluded.pct_max_bid, dual_price=excluded.dual_price, unit_label=excluded.unit_label, value_source=excluded.value_source",
+		[(new_scenario_id,) + row for row in bidder_year_rows])
+	avg_ep, avg_rp, emis, removal, emitters_pay, removers_get = defaults_and_utilities.compute_scenario_summary_stats(bidder_year_rows)
+	cursor.execute("UPDATE scenarios SET Avg_emitter_price_2025_2125=?, Avg_remover_price_2025_2125=?, Emissions_2025_2125=?, Removal_cost_2025_2125=?, emitters_pay=?, removers_get=? WHERE id=?",
+		(avg_ep, avg_rp, emis, removal, emitters_pay, removers_get, new_scenario_id))
+	conn.commit()
+	conn.close()
+	print(f"Solve complete. Total time {time.time() - start_time:.1f}s.")
+	return new_scenario_id
+# END run_SMDAMAGE_short_auctions_implicit_land_constraints().
+
 def get_SMDAMAGE_temps_actual_and_taxed(scenario):
 	db_path = defaults_and_utilities.getSolutionsDBPath()
 	scenario_id = database_interface.get_scenario_id(db_path, defaults_and_utilities.getExperimentTag(scenario))
