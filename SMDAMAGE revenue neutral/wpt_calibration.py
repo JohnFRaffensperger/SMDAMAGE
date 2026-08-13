@@ -58,17 +58,20 @@ def run_SMDAMAGE_fit_W(scenario):
 	# Data is the previous vpt solution from SMDAMAGE and the Hector temperature.
 	# If scenario.use_updated_Wpt is already True, calibration still needs the pre-fit (default Wpt) run.
 	db_path = defaults_and_utilities.getSolutionsDBPath()
-	source_tag = defaults_and_utilities.getExperimentTag(scenario)
-	Vpt_scenario_id = database_interface.get_scenario_id(db_path, source_tag)
-	if Vpt_scenario_id is None and scenario.use_updated_Wpt:
-		scenario.use_updated_Wpt = False
-		fallback_tag = defaults_and_utilities.getExperimentTag(scenario)
-		Vpt_scenario_id = database_interface.get_scenario_id(db_path, fallback_tag)
-		scenario.use_updated_Wpt = True
+	if scenario.calibration_scenario_id is not None:
+		Vpt_scenario_id = scenario.calibration_scenario_id
+	else:
+		source_tag = defaults_and_utilities.getExperimentTag(scenario)
+		Vpt_scenario_id = database_interface.get_scenario_id(db_path, source_tag)
+		if Vpt_scenario_id is None and scenario.use_updated_Wpt:
+			scenario.use_updated_Wpt = False
+			fallback_tag = defaults_and_utilities.getExperimentTag(scenario)
+			Vpt_scenario_id = database_interface.get_scenario_id(db_path, fallback_tag)
+			scenario.use_updated_Wpt = True
+			if Vpt_scenario_id is None:
+				raise ValueError("Missing solutions DB scenario for Wpt calibration: " + source_tag + " or " + fallback_tag)
 		if Vpt_scenario_id is None:
-			raise ValueError("Missing solutions DB scenario for Wpt calibration: " + source_tag + " or " + fallback_tag)
-	if Vpt_scenario_id is None:
-		raise ValueError("Missing solutions DB scenario for Wpt calibration: " + source_tag)
+			raise ValueError("Missing solutions DB scenario for Wpt calibration: " + source_tag)
 	Vpt = database_interface.get_vpt_from_db(defaults_and_utilities.getSolutionsDBPath(), Vpt_scenario_id)
 
 	# Construct PT_set. ------------------------------------------------------------------------------------------

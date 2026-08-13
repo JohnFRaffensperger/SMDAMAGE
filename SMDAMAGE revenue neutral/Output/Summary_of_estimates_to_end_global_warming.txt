@@ -1,0 +1,8 @@
+Estimate 3, weak contracts	Estimate 1, 3rd party pays	Estimate 4, short auctions	Estimate 2, fixed tau	Estimate 5, dynamic tau
+Model	SMDAMAGE_1	SMDAMAGE_0	SMDAMAGE_2	SMDAMAGE_1	SMDAMAGE_1
+Third party pays	$0 trillion	$-5.89 trillion	$0.4 trillion	$0 trillion	$0 trillion
+Average emitter price	$-74.56/tC ($-20.33/tCO2)	$-17.05/tC ($-4.65/tCO2)	$-56.77/tC ($-15.48/tCO2)	$-28.35/tC ($-7.73/tCO2)	$-31.34/tC ($-8.55/tCO2)
+Average remover price	$12.6/tC ($3.44/tCO2)	$17.05/tC ($4.65/tCO2)	$33.29/tC ($9.08/tCO2)	$16.76/tC ($4.57/tCO2)	$19.1/tC ($5.21/tCO2)
+Emissions 2025-2125	430 GtC	471.3 GtC	439.8 GtC	470.9 GtC	492.1 GtC
+Removal cost 2025-2125	$9.77 trillion	$14.07 trillion	$22.76 trillion	$13.76 trillion	$16.22 trillion
+Land rent	$0 trillion	$0 trillion	$0 trillion	$0 trillion	$0 trillion
