@@ -231,7 +231,7 @@ def print_results_text(scenario_id):
 	id, name, disc, tau, is_rev_neutral, emitters_pay, removers_get, net_revenue, emitter_price_C, remover_price_C, total_emissions, is_implicit = cursor.fetchone()
 	source_id = scenario_id
 	if is_implicit:
-		source_id = int(name.split(',')[0].split()[-1])
+		source_id = int(name.split(',')[1].strip())
 		cursor.execute("SELECT name FROM scenarios WHERE id = ?", (source_id,))
 		source_name = cursor.fetchone()[0]
 	conn.close()
@@ -255,3 +255,25 @@ def print_results_text(scenario_id):
 		f.write(final_text + "\n\n")
 	return final_text
 # if __name__ == '__main__': print (print_results_text(11))
+
+def find_recent_scenario(name):
+	"""Return the id of the most recent Optimal scenario matching name exactly, or None."""
+	with sqlite3.connect(getSolutionsDBPath()) as conn:
+		row = conn.execute(
+			"SELECT id FROM scenarios WHERE name = ? AND solver_status = 'Optimal' ORDER BY id DESC LIMIT 1",
+			(name,)).fetchone()
+	return row[0] if row else None
+
+def recover_intro_state(primary_tau):
+	"""Return (Intro_scenario, calibrated_initial_temperature) recovered from DB, or (None, None) if not found."""
+	with sqlite3.connect(getSolutionsDBPath()) as conn:
+		row = conn.execute(
+			"SELECT initial_temp, calibration_scenario FROM scenarios "
+			"WHERE name LIKE 'Intro explicit%' AND use_updated_Wpt=1 AND solver_status='Optimal' "
+			"ORDER BY id DESC LIMIT 1").fetchone()
+	if row is None: return None, None
+	calibrated_temp, cal_id = row
+	s = Scenario(comment="Intro explicit", discount_rate=0.03, initial_temperature=calibrated_temp,
+		tau=primary_tau, is_revenue_neutral=True, is_removal_luc=False,
+		use_updated_Wpt=True, calibration_scenario_id=cal_id)
+	return s, calibrated_temp

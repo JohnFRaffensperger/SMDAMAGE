@@ -23,7 +23,7 @@ import datetime
 import sqlite3
 import numpy as np
 
-SOLVE_RESTRICTED = False # use column generation for faster solutions in run_SMDAMAGE and run_SMDAMAGE_for_tau.
+SOLVE_RESTRICTED = True # use column generation for faster solutions in run_SMDAMAGE and run_SMDAMAGE_for_tau.
 
 # Retrieve warming parameters from the database and collect them into the Wpt dictionary for all bidders.
 def get_warming_effects(scenario): # Get warming effects in degrees Celsius in each period, based on the solution vpt.
@@ -303,6 +303,10 @@ def save_solution_to_db(scenario, SMDAMAGE, vpt, qapt, Vname, temp_data=None, sc
 def run_SMDAMAGE(scenario):
 	start_time = time.time()
 	defaults_and_utilities.ensure_solutions_db()
+	_existing = defaults_and_utilities.find_recent_scenario(defaults_and_utilities.getExperimentTag(scenario))
+	if _existing is not None:
+		print(f"Reusing scenario {_existing}: {defaults_and_utilities.getExperimentTag(scenario)}.")
+		return _existing
 	if scenario.is_revenue_neutral: print ("\nSMDAMAGE_1. " + defaults_and_utilities.getExperimentTag(scenario) + ". " + time.asctime(time.localtime(time.time())) + ".")
 	else: print ("\nSMDAMAGE_0. " + defaults_and_utilities.getExperimentTag(scenario) + ". " + time.asctime(time.localtime(time.time())) + ".")
 
@@ -382,6 +386,10 @@ def solve_smdamage_with_implicit_land_constraints(scenario_id):
 		is_removal_luc=bool(params['is_removal_luc']),
 		use_updated_Wpt=bool(params['use_updated_Wpt']),
 		calibration_scenario_id=params['calibration_scenario'])
+	_existing = defaults_and_utilities.find_recent_scenario(defaults_and_utilities.getExperimentTag(scenario))
+	if _existing is not None:
+		print(f"Reusing implicit scenario {_existing}: {defaults_and_utilities.getExperimentTag(scenario)}.")
+		return _existing
 	print(f"\nSMDAMAGE implicit land constraints, source scenario {scenario_id}. {time.asctime(time.localtime(time.time()))}.")
 
 	forestry_bidder_names = set(database_interface.get_forestry_bidder_names())
@@ -445,6 +453,10 @@ def solve_smdamage_with_implicit_land_constraints_for_tau_search(scenario_id):
 		is_removal_luc=bool(params['is_removal_luc']),
 		use_updated_Wpt=bool(params['use_updated_Wpt']),
 		calibration_scenario_id=params['calibration_scenario'])
+	_existing = defaults_and_utilities.find_recent_scenario(defaults_and_utilities.getExperimentTag(scenario))
+	if _existing is not None:
+		print(f"Reusing implicit tau-search scenario {_existing}: {defaults_and_utilities.getExperimentTag(scenario)}.")
+		return _existing
 	print(f"\nSMDAMAGE implicit land constraints (tau search), source scenario {scenario_id}. {time.asctime(time.localtime(time.time()))}.")
 
 	tau_series_name = "SMDAMAGE tau calibrated" if params['use_updated_Wpt'] else "SMDAMAGE tau uncalibrated"
@@ -520,6 +532,10 @@ def update_tau (old_temp, current_temp, old_tau, current_tau, step_size):
 # Warning! Very slow, e.g., 8 hours to run this.
 def run_SMDAMAGE_for_tau(scenario):
 	defaults_and_utilities.ensure_solutions_db()
+	_existing = defaults_and_utilities.find_recent_scenario(defaults_and_utilities.getExperimentTag(scenario))
+	if _existing is not None:
+		print(f"Reusing tau-search scenario {_existing}: {defaults_and_utilities.getExperimentTag(scenario)}.")
+		return _existing
 	Wpt_dict = get_warming_effects(scenario) # Get warming effects in degrees Celsius in each period, based on the solution vpt.
 	Bapt, Uapt, APT_set, PT_set = read_bids(scenario)
 
@@ -612,6 +628,10 @@ def run_SMDAMAGE_for_tau(scenario):
 # This is the version that could actually be implemented. The auction manager (and policymakers I guess) would have to choose tau[t] in advance.
 # We could end global warming with this.
 def run_SMDAMAGE_short_auctions(years_in_auction, land_scale_factor, scenario):
+	_existing = defaults_and_utilities.find_recent_scenario(defaults_and_utilities.getExperimentTag(scenario))
+	if _existing is not None:
+		print(f"Reusing short-auctions scenario {_existing}: {defaults_and_utilities.getExperimentTag(scenario)}.")
+		return _existing
 	print ("\nSMDAMAGE_2, short auctions. " + defaults_and_utilities.getExperimentTag(scenario) + ". " + time.asctime(time.localtime(time.time())) + ".")
 	AllBidPeriods = defaults_and_utilities.getBidPeriods()
 
@@ -799,6 +819,10 @@ def run_SMDAMAGE_short_auctions_implicit_land_constraints(source_scenario_id):
 		is_removal_luc=bool(params['is_removal_luc']),
 		use_updated_Wpt=bool(params['use_updated_Wpt']),
 		calibration_scenario_id=params['calibration_scenario'])
+	_existing = defaults_and_utilities.find_recent_scenario(defaults_and_utilities.getExperimentTag(scenario))
+	if _existing is not None:
+		print(f"Reusing implicit short-auctions scenario {_existing}: {defaults_and_utilities.getExperimentTag(scenario)}.")
+		return _existing
 	print(f"\nSMDAMAGE_2 implicit land, source scenario {source_scenario_id}, {years_in_auction}yr auctions. {time.asctime(time.localtime(time.time()))}.")
 
 	forestry_bidder_names = set(database_interface.get_forestry_bidder_names())

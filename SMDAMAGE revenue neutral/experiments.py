@@ -15,6 +15,7 @@ import hector_interface
 import plotting_utils
 import wpt_calibration
 import time
+import os
 from smdamage_models import run_SMDAMAGE, run_SMDAMAGE_short_auctions, run_SMDAMAGE_for_tau, get_SMDAMAGE_temps_actual_and_taxed, solve_smdamage_with_implicit_land_constraints, solve_smdamage_with_implicit_land_constraints_for_tau_search, run_SMDAMAGE_short_auctions_implicit_land_constraints
 
 # --- Intro, Figure 2: SMDAMAGE_1 (is_revenue_neutral = True), uncalibrated and calibrated temperature trajectories. ---
@@ -29,8 +30,10 @@ def run_Intro (primary_tau):
 
 	# Assess the implicit-land solution with Hector; use its comment so calibration reads the right file.
 	Intro_scenario.comment, Intro_scenario.calibration_scenario_id = Intro_scenario.comment.replace(' explicit', f' implicit, {Intro_uncalibrated_explicit_id}'), None
-	hector_interface.run_Hector_with_SMDAMAGE_solution (Intro_scenario)
-	wpt_calibration.run_SMDAMAGE_fit_W (Intro_scenario)
+	if not os.path.exists(defaults_and_utilities.Hector_output_file_name(Intro_scenario)):
+		hector_interface.run_Hector_with_SMDAMAGE_solution (Intro_scenario)
+	if not database_interface.get_fitted_wpt(defaults_and_utilities.getSolutionsDBPath(), Intro_uncalibrated_id):
+		wpt_calibration.run_SMDAMAGE_fit_W (Intro_scenario)
 	Intro_scenario.comment, Intro_scenario.calibration_scenario_id = "Intro explicit", Intro_uncalibrated_id
 
 	# Rerun SMDAMAGE_1 with the calibrated warming factors.
@@ -41,11 +44,12 @@ def run_Intro (primary_tau):
 
 	# Rerun Hector with the implicit-land calibrated solution.
 	Intro_scenario.comment = Intro_scenario.comment.replace(' explicit', f' implicit, {Intro_calibrated_id}')
-	hector_interface.run_Hector_with_SMDAMAGE_solution (Intro_scenario)
+	if not os.path.exists(defaults_and_utilities.Hector_output_file_name(Intro_scenario)):
+		hector_interface.run_Hector_with_SMDAMAGE_solution (Intro_scenario)
 	Intro_scenario.comment = "Intro explicit"
 
 	# Actual figure 2: SMDAMAGE uncalibrated, SMDAMAGE calibrated, Hector with SMDAMAGE calibrated.
-	plotting_utils.Uncalibrated_and_calibrated_temperature_trajectories (defaults_and_utilities.getSolutionsDBPath(), defaults_and_utilities.getOutputDirectory(), Intro_uncalibrated_id, Intro_implicit_id, Intro_calibrated_id)
+	plotting_utils.Uncalibrated_and_calibrated_temperature_trajectories (defaults_and_utilities.getSolutionsDBPath(), defaults_and_utilities.getOutputDirectory(), Intro_uncalibrated_id, Intro_implicit_id, Intro_implicit_id)
 	return Intro_scenario, Intro_scenario.initial_temperature
 
 # --- Estimate 1, Figure 3: SMDAMAGE_0, is_revenue_neutral = False so we have 3rd-party payments, 4 discount rates.  ---
@@ -173,7 +177,11 @@ def run_all_experiments ():
 	primary_tau = 1.8 # An initial guess.
 	preferred_tau = 1.7 # Found by running run_figures4_5_6().
 
-	Intro_scenario, calibrated_initial_temperature = run_Intro (primary_tau)
+	Intro_scenario, calibrated_initial_temperature = defaults_and_utilities.recover_intro_state(primary_tau)
+	if Intro_scenario is None:
+		Intro_scenario, calibrated_initial_temperature = run_Intro(primary_tau)
+	else:
+		print(f"Reusing Intro state: temp0={calibrated_initial_temperature:.3f}, cal_id={Intro_scenario.calibration_scenario_id}.")
 
 	estimate1_id = run_Vary_discount_rate (Intro_scenario, calibrated_initial_temperature, primary_tau)
 
