@@ -19,10 +19,10 @@ def ensure_solutions_db():
 	db_path = getSolutionsDBPath()
 	conn = sqlite3.connect(db_path)
 	cursor = conn.cursor()
-	cursor.executescript("""CREATE TABLE IF NOT EXISTS scenarios (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, discount_rate REAL, initial_temp REAL, tau REAL,
-			is_revenue_neutral INTEGER, is_removal_luc INTEGER, use_updated_Wpt INTEGER, solver_status TEXT, objective_value REAL, Removal_cost_2025_2125 REAL,
-			net_revenue REAL, Emissions_2025_2125 REAL, Avg_emitter_price_2025_2125 REAL, Avg_remover_price_2025_2125 REAL, solution_datetime TEXT,
-			is_land_constraint_implicit INTEGER DEFAULT 0, calibration_scenario INTEGER, emitters_pay REAL, removers_get REAL);
+	cursor.executescript("""CREATE TABLE IF NOT EXISTS scenarios (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, is_land_constraint_implicit INTEGER DEFAULT 0,
+			is_revenue_neutral INTEGER, tau REAL, discount_rate REAL, is_removal_luc INTEGER, use_updated_Wpt INTEGER, calibration_scenario INTEGER, initial_temp REAL, solver_status TEXT,
+			objective_value REAL, Removal_cost_2025_2125 REAL, net_revenue REAL, Emissions_2025_2125 REAL, Avg_emitter_price_2025_2125 REAL, Avg_remover_price_2025_2125 REAL, solution_datetime TEXT,
+			emitters_pay REAL, removers_get REAL);
 		CREATE TABLE IF NOT EXISTS variables (id INTEGER PRIMARY KEY AUTOINCREMENT, scenario_id INTEGER, bidder TEXT, year REAL, bid_step INTEGER, value REAL,
 			FOREIGN KEY (scenario_id) REFERENCES scenarios(id));
 		CREATE TABLE IF NOT EXISTS constraint_duals (id INTEGER PRIMARY KEY AUTOINCREMENT, scenario_id INTEGER, constraint_name TEXT, pi REAL, FOREIGN KEY (scenario_id) REFERENCES scenarios(id));

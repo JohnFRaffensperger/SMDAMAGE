@@ -63,6 +63,7 @@ def Uncalibrated_and_calibrated_temperature_trajectories(db_path, output_directo
 	smdamage_uncalibrated = database_interface.get_temperature_series_by_scenario_id(db_path, scenario_id_uncalibrated, "SMDAMAGE actual temp uncalibrated")
 	smdamage_calibrated = database_interface.get_temperature_series_by_scenario_id(db_path, scenario_id_calibrated, "SMDAMAGE actual temp calibrated")
 	hector_calibrated = database_interface.get_temperature_series_by_scenario_id(db_path, scenario_id_hector, "Hector with calibrated")
+	assert hector_calibrated, f"No 'Hector with calibrated' series for scenario_id {scenario_id_hector}"
 
 	uncalibrated_years = sorted(smdamage_uncalibrated.keys())
 	calibrated_years = sorted(smdamage_calibrated.keys())

@@ -372,8 +372,9 @@ def solve_smdamage_with_implicit_land_constraints(scenario_id):
 	defaults_and_utilities.ensure_solutions_db()
 	start_time = time.time()
 	params = database_interface.get_scenario_full_params(db_path, scenario_id)
+	with sqlite3.connect(db_path) as _conn: source_label = _conn.execute("SELECT name FROM scenarios WHERE id=?", (scenario_id,)).fetchone()[0].split(',')[0].replace(' explicit', '').strip()
 	scenario = defaults_and_utilities.Scenario(
-		comment=f"Implicit land {scenario_id}",
+		comment=f"{source_label} implicit, {scenario_id}",
 		discount_rate=params['discount_rate'],
 		initial_temperature=params['initial_temp'],
 		is_revenue_neutral=bool(params['is_revenue_neutral']),
@@ -434,8 +435,9 @@ def solve_smdamage_with_implicit_land_constraints_for_tau_search(scenario_id):
 	defaults_and_utilities.ensure_solutions_db()
 	start_time = time.time()
 	params = database_interface.get_scenario_full_params(db_path, scenario_id)
+	with sqlite3.connect(db_path) as _conn: source_label = _conn.execute("SELECT name FROM scenarios WHERE id=?", (scenario_id,)).fetchone()[0].split(',')[0].replace(' explicit', '').strip()
 	scenario = defaults_and_utilities.Scenario(
-		comment=f"Implicit land {scenario_id}",
+		comment=f"{source_label} implicit, {scenario_id}",
 		discount_rate=params['discount_rate'],
 		initial_temperature=params['initial_temp'],
 		is_revenue_neutral=bool(params['is_revenue_neutral']),
@@ -786,9 +788,10 @@ def run_SMDAMAGE_short_auctions_implicit_land_constraints(source_scenario_id):
 	source_name = conn0.execute("SELECT name FROM scenarios WHERE id = ?", (source_scenario_id,)).fetchone()[0]
 	conn0.close()
 	years_in_auction = int(source_name.split('yrs')[0].split()[-1])
+	source_label = source_name.split(',')[0].replace(' explicit', '').strip()
 	params = database_interface.get_scenario_full_params(db_path, source_scenario_id)
 	scenario = defaults_and_utilities.Scenario(
-		comment=f"Implicit land {source_scenario_id}",
+		comment=f"{source_label} implicit, {source_scenario_id}",
 		discount_rate=params['discount_rate'],
 		initial_temperature=params['initial_temp'],
 		is_revenue_neutral=bool(params['is_revenue_neutral']),
