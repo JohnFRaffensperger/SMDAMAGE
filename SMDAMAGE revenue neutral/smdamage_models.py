@@ -23,7 +23,7 @@ import datetime
 import sqlite3
 import numpy as np
 
-SOLVE_RESTRICTED = True # use column generation for faster solutions in run_SMDAMAGE and run_SMDAMAGE_for_tau.
+SOLVE_RESTRICTED = False # use column generation for faster solutions in run_SMDAMAGE and run_SMDAMAGE_for_tau.
 
 # Retrieve warming parameters from the database and collect them into the Wpt dictionary for all bidders.
 def get_warming_effects(scenario): # Get warming effects in degrees Celsius in each period, based on the solution vpt.

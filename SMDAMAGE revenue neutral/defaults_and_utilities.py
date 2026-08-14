@@ -240,7 +240,7 @@ def print_results_text(scenario_id):
 	emitter_price_C, remover_price_C = round(emitter_price_C, 2), round(remover_price_C, 2)
 
 	final_text = f"{id}, {name}: For this case, with a {disc * 100:.4g}% discount rate, emitters pay about ${-emitters_pay:.2f} trillion over 100 years to carbon removers"
-	if is_implicit: final_text = f"Based on scenario {source_id}: {source_name}." + final_text
+	if is_implicit: final_text = f"Based on scenario {source_id}." + final_text
 	if is_rev_neutral:
 		final_text += f" with no third party payments. Emitters are carbon negative. Because emitters pay the surcharge τ = {tau} for drawdown,"
 		final_text += f" emitters face an average price of about ${-emitter_price_C:.2f}/tC (${-emitter_price_CO2:.2f}/tCO2)."
@@ -251,5 +251,7 @@ def print_results_text(scenario_id):
 		final_text += f" Total drawdown therefore costs about ${removers_get:.2f} trillion."
 		final_text += f" Emitters and removers face an average price of about ${emitter_price_C:.2f}/tC (${emitter_price_CO2:.2f}/tCO2)."
 		final_text += f" From 2025 to 2125, total carbon emissions are {total_emissions:.1f} GtC."
+	with open(getOutputDirectory() + "Summary_of_estimates_to_end_global_warming.txt", "a", encoding="utf-8") as f:
+		f.write(final_text + "\n\n")
 	return final_text
 # if __name__ == '__main__': print (print_results_text(11))
