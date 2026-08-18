@@ -53,7 +53,7 @@ def run_Intro (primary_tau):
 	return Intro_scenario, Intro_scenario.initial_temperature
 
 # --- Estimate 1, Figure 3: SMDAMAGE_0, is_revenue_neutral = False so we have 3rd-party payments, 4 discount rates.  ---
-def run_Vary_discount_rate (Intro_scenario, calibrated_initial_temperature, primary_tau):
+def run_SMDAMAGE_0_Vary_discount_rate (Intro_scenario, calibrated_initial_temperature, primary_tau):
 	ids = []
 	for discount_rate in [0.0, 0.015, 0.03, 0.06]:
 		# Specify the scenario.
@@ -160,6 +160,26 @@ def run_Short_auctions (Intro_scenario, calibrated_initial_temperature, preferre
 			id_list[(years, land_scale_factor)] = implicit_id
 	return id_list
 
+# --- New experiment: SMDAMAGE_0, 3rd-party payer, full horizon, 10x land area. ---
+def run_SMDAMAGE_0_more_land (Intro_scenario, calibrated_initial_temperature, primary_tau, land_scale_factor=10.0):
+	s = defaults_and_utilities.Scenario(comment = "SMDAMAGE_0_more_land explicit", discount_rate = 0.03,
+		initial_temperature = calibrated_initial_temperature, tau = primary_tau,
+		is_revenue_neutral = False, is_removal_luc = False, use_updated_Wpt = True, calibration_scenario_id = Intro_scenario.calibration_scenario_id)
+	s_id = run_SMDAMAGE (s, land_scale_factor = land_scale_factor)
+	implicit_id = solve_smdamage_with_implicit_land_constraints (s_id)
+	print (defaults_and_utilities.print_results_text(implicit_id))
+	return implicit_id
+
+# --- New experiment: SMDAMAGE_1, revenue neutral, tau=1.7, full horizon, 10x land area. ---
+def run_SMDAMAGE_1_more_land (Intro_scenario, calibrated_initial_temperature, preferred_tau, land_scale_factor=10.0):
+	s = defaults_and_utilities.Scenario(comment = "SMDAMAGE_1_more_land explicit", discount_rate = 0.03,
+		initial_temperature = calibrated_initial_temperature, tau = preferred_tau,
+		is_revenue_neutral = True, is_removal_luc = False, use_updated_Wpt = True, calibration_scenario_id = Intro_scenario.calibration_scenario_id)
+	s_id = run_SMDAMAGE (s, land_scale_factor = land_scale_factor)
+	implicit_id = solve_smdamage_with_implicit_land_constraints (s_id)
+	print (defaults_and_utilities.print_results_text(implicit_id))
+	return implicit_id
+
 # --- Estimate 5: time-varying tau (subgradient search) ---
 def run_Dynamic_tau (Intro_scenario, calibrated_initial_temperature, primary_tau):
 	# Define the scenario. Start with tau = primary_tau for each constrained year, then subgradient optimization to choose tau for each year.
@@ -183,7 +203,7 @@ def run_all_experiments ():
 	else:
 		print(f"Reusing Intro state: temp0={calibrated_initial_temperature:.3f}, cal_id={Intro_scenario.calibration_scenario_id}.")
 
-	estimate1_id = run_Vary_discount_rate (Intro_scenario, calibrated_initial_temperature, primary_tau)
+	estimate1_id = run_SMDAMAGE_0_Vary_discount_rate (Intro_scenario, calibrated_initial_temperature, primary_tau)
 
 	run_Vary_tau (Intro_scenario, calibrated_initial_temperature)
 
@@ -198,6 +218,9 @@ def run_all_experiments ():
 	db = defaults_and_utilities.getSolutionsDBPath()
 	out = defaults_and_utilities.getOutputDirectory()
 	plotting_utils.Summary_of_estimates_to_end_global_warming (db, estimate3_id, estimate1_id, estimate4_ids[(8, 1.5)], estimate2_id, estimate5_id, out)
+
+	run_SMDAMAGE_0_more_land (Intro_scenario, calibrated_initial_temperature, primary_tau)
+	run_SMDAMAGE_1_more_land (Intro_scenario, calibrated_initial_temperature, preferred_tau)
 
 if __name__ == "__main__":
 	# Preliminary: get pulses from Hector. Only needed if warming_factors table is empty.

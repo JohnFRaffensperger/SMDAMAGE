@@ -108,7 +108,7 @@ def read_bids(scenario):
 				Uapt[bidstep, bidder_name, t] = quantity / hector_interface.getPeriodsPerYear()
 	return Bapt, Uapt, APT_set, PT_set
 
-def Solve_SMDAMAGE(scenario, APT_set, PT_set, Bapt, Uapt, Wpt_dict, BidStepSet, Pollutants, tau_override=None, tau_mode="standard", restrict_columns=True, forestry_fixed_ub=None):
+def Solve_SMDAMAGE(scenario, APT_set, PT_set, Bapt, Uapt, Wpt_dict, BidStepSet, Pollutants, tau_override=None, tau_mode="standard", restrict_columns=True, forestry_fixed_ub=None, land_scale_factor=1.0):
 	"""
 	Called by run_SMDAMAGE and run_SMDAMAGE_for_tau. If not scenario.is_revenue_neutral, this function solves SMDAMAGE_0, else this function solves SMDAMAGE_1.
 	The function runs a simplified column generation algorithm, starting with a restricted set of columns if available in the database.
@@ -152,7 +152,7 @@ def Solve_SMDAMAGE(scenario, APT_set, PT_set, Bapt, Uapt, Wpt_dict, BidStepSet, 
 
 	# Total area, used below in 3.2 land constraint.
 	forestry_contract_data = database_interface.get_forestry_contractdata()
-	total_area = sum(meta['available_area_mhectares'] for meta in forestry_contract_data.values())
+	total_area = land_scale_factor * sum(meta['available_area_mhectares'] for meta in forestry_contract_data.values())
 
 	temp_exprs = {t: lpSum(sparse_Wpt[(p, float(t - u))] * vpt[p, u] for (p, u) in PT_set if u <= t and (p, float(t - u)) in sparse_Wpt) - temperatureChange[t] for t in ModelPeriods}
 	if scenario.is_revenue_neutral:
@@ -300,7 +300,7 @@ def save_solution_to_db(scenario, SMDAMAGE, vpt, qapt, Vname, temp_data=None, sc
 	return scenario_id
 
 # Main function. With solve_SMDAMAGE above, solve the SMDAMAGE model to find the best schedule of emissions and carbon removal.
-def run_SMDAMAGE(scenario):
+def run_SMDAMAGE(scenario, land_scale_factor=1.0):
 	start_time = time.time()
 	defaults_and_utilities.ensure_solutions_db()
 	_existing = defaults_and_utilities.find_recent_scenario(defaults_and_utilities.getExperimentTag(scenario))
@@ -329,7 +329,7 @@ def run_SMDAMAGE(scenario):
 	local_tau = scenario.tau # We have to change tau when the temperature is low enough (at the end of this loop), but we don't want to change the output filename.
 
 	# Solve the model with a simple column and row generation algorithm.
-	SMDAMAGE, qapt, vpt, temperatureChange, taxedTemperatureChange, Vname, solve_status = Solve_SMDAMAGE(scenario, APT_set, PT_set, Bapt, Uapt, Wpt_dict, BidStepSet, Pollutants)
+	SMDAMAGE, qapt, vpt, temperatureChange, taxedTemperatureChange, Vname, solve_status = Solve_SMDAMAGE(scenario, APT_set, PT_set, Bapt, Uapt, Wpt_dict, BidStepSet, Pollutants, land_scale_factor=land_scale_factor)
 
 	netrevenue = 0.0 # Show net revenue with marginal cost pricing.
 	yearlyrevenue = {t: 0.0 for t in defaults_and_utilities.getBidPeriods()}
