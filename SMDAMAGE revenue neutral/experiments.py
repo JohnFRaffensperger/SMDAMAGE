@@ -121,8 +121,10 @@ def run_Contracts (calibrated_initial_temperature, preferred_tau):
 
 	# Run Hector and calibrate W.
 	contracts.comment, contracts.calibration_scenario_id = contracts.comment.replace(' explicit', f' implicit, {contracts_uncal_explicit_id}'), None
-	hector_interface.run_Hector_with_SMDAMAGE_solution (contracts)
-	wpt_calibration.run_SMDAMAGE_fit_W (contracts)
+	if not os.path.exists(defaults_and_utilities.Hector_output_file_name(contracts)):
+		hector_interface.run_Hector_with_SMDAMAGE_solution (contracts)
+	if not database_interface.get_fitted_wpt(defaults_and_utilities.getSolutionsDBPath(), contracts_uncal_id):
+		wpt_calibration.run_SMDAMAGE_fit_W (contracts)
 
 	# Rerun SMDAMAGE_1 with calibrated "luc" warming coefficients.
 	contracts.comment, contracts.calibration_scenario_id = "Contracts explicit", contracts_uncal_id
@@ -134,7 +136,8 @@ def run_Contracts (calibrated_initial_temperature, preferred_tau):
 
 	# Rerun Hector with the implicit-land calibrated solution.
 	contracts.comment = contracts.comment.replace(' explicit', f' implicit, {estimate3_explicit_id}')
-	hector_interface.run_Hector_with_SMDAMAGE_solution (contracts)
+	if not os.path.exists(defaults_and_utilities.Hector_output_file_name(contracts)):
+		hector_interface.run_Hector_with_SMDAMAGE_solution (contracts)
 	contracts.comment = "Contracts explicit"
 
 	# Print Estimate 3.
@@ -161,21 +164,21 @@ def run_Short_auctions (Intro_scenario, calibrated_initial_temperature, preferre
 	return id_list
 
 # --- New experiment: SMDAMAGE_0, 3rd-party payer, full horizon, 10x land area. ---
-def run_SMDAMAGE_0_more_land (Intro_scenario, calibrated_initial_temperature, primary_tau, land_scale_factor=10.0):
-	s = defaults_and_utilities.Scenario(comment = "SMDAMAGE_0_more_land explicit", discount_rate = 0.03,
+def run_SMDAMAGE_0_expensive_forest (Intro_scenario, calibrated_initial_temperature, primary_tau, land_scale_factor=1.0):
+	s = defaults_and_utilities.Scenario(comment = "SMDAMAGE_0_expensive_forest explicit", discount_rate = 0.03,
 		initial_temperature = calibrated_initial_temperature, tau = primary_tau,
 		is_revenue_neutral = False, is_removal_luc = False, use_updated_Wpt = True, calibration_scenario_id = Intro_scenario.calibration_scenario_id)
-	s_id = run_SMDAMAGE (s, land_scale_factor = land_scale_factor)
+	s_id = run_SMDAMAGE (s, land_scale_factor = land_scale_factor, forestry_price_scale = 10.0)
 	implicit_id = solve_smdamage_with_implicit_land_constraints (s_id)
 	print (defaults_and_utilities.print_results_text(implicit_id))
 	return implicit_id
 
 # --- New experiment: SMDAMAGE_1, revenue neutral, tau=1.7, full horizon, 10x land area. ---
-def run_SMDAMAGE_1_more_land (Intro_scenario, calibrated_initial_temperature, preferred_tau, land_scale_factor=10.0):
-	s = defaults_and_utilities.Scenario(comment = "SMDAMAGE_1_more_land explicit", discount_rate = 0.03,
+def run_SMDAMAGE_1_expensive_forest (Intro_scenario, calibrated_initial_temperature, preferred_tau, land_scale_factor=1.0):
+	s = defaults_and_utilities.Scenario(comment = "SMDAMAGE_1_expensive_forest explicit", discount_rate = 0.03,
 		initial_temperature = calibrated_initial_temperature, tau = preferred_tau,
 		is_revenue_neutral = True, is_removal_luc = False, use_updated_Wpt = True, calibration_scenario_id = Intro_scenario.calibration_scenario_id)
-	s_id = run_SMDAMAGE (s, land_scale_factor = land_scale_factor)
+	s_id = run_SMDAMAGE (s, land_scale_factor = land_scale_factor, forestry_price_scale = 10.0)
 	implicit_id = solve_smdamage_with_implicit_land_constraints (s_id)
 	print (defaults_and_utilities.print_results_text(implicit_id))
 	return implicit_id
@@ -219,8 +222,8 @@ def run_all_experiments ():
 	out = defaults_and_utilities.getOutputDirectory()
 	plotting_utils.Summary_of_estimates_to_end_global_warming (db, estimate3_id, estimate1_id, estimate4_ids[(8, 1.5)], estimate2_id, estimate5_id, out)
 
-	run_SMDAMAGE_0_more_land (Intro_scenario, calibrated_initial_temperature, primary_tau)
-	run_SMDAMAGE_1_more_land (Intro_scenario, calibrated_initial_temperature, preferred_tau)
+	run_SMDAMAGE_0_expensive_forest (Intro_scenario, calibrated_initial_temperature, primary_tau)
+	run_SMDAMAGE_1_expensive_forest (Intro_scenario, calibrated_initial_temperature, preferred_tau)
 
 if __name__ == "__main__":
 	# Preliminary: get pulses from Hector. Only needed if warming_factors table is empty.

@@ -76,7 +76,7 @@ def get_warming_effects(scenario): # Get warming effects in degrees Celsius in e
 	return Wpt_dict
 
 # Read all current bids from the database.
-def read_bids(scenario):
+def read_bids(scenario, forestry_price_scale=1.0):
 	AllBidPeriods = defaults_and_utilities.getBidPeriods()
 	StartYear = defaults_and_utilities.getStartYear()
 
@@ -104,7 +104,11 @@ def read_bids(scenario):
 					# For ['C2F6', 'CF4', 'HFC125', 'HFC134a', 'HFC143a', 'SF6'], data is given in $/ton and quantities are kilotons, but decision variables should be $million/kiloton.
 					# Thus, $500/ton --> $0.5 million per kiloton, so we need to divide by 1000.
 					Bapt[bidstep, bidder_name, t] = price * scenario.discount_rate(t - StartYear)/1000
-				else: Bapt[bidstep, bidder_name, t] = price * scenario.discount_rate(t - StartYear)
+				# ------------------------------------------
+				# TEMPORARILY increase forest prices by 10x.
+				# else: Bapt[bidstep, bidder_name, t] = price * scenario.discount_rate(t - StartYear)
+				else: Bapt[bidstep, bidder_name, t] = price * scenario.discount_rate(t - StartYear) * (forestry_price_scale if is_forestry else 1.0)
+				# ------------------------------------------
 				Uapt[bidstep, bidder_name, t] = quantity / hector_interface.getPeriodsPerYear()
 	return Bapt, Uapt, APT_set, PT_set
 
@@ -300,7 +304,7 @@ def save_solution_to_db(scenario, SMDAMAGE, vpt, qapt, Vname, temp_data=None, sc
 	return scenario_id
 
 # Main function. With solve_SMDAMAGE above, solve the SMDAMAGE model to find the best schedule of emissions and carbon removal.
-def run_SMDAMAGE(scenario, land_scale_factor=1.0):
+def run_SMDAMAGE(scenario, land_scale_factor=1.0, forestry_price_scale=1.0):
 	start_time = time.time()
 	defaults_and_utilities.ensure_solutions_db()
 	_existing = defaults_and_utilities.find_recent_scenario(defaults_and_utilities.getExperimentTag(scenario))
@@ -315,7 +319,8 @@ def run_SMDAMAGE(scenario, land_scale_factor=1.0):
 	Wpt_dict = get_warming_effects(scenario) # Get warming effects in degrees Celsius in each period, based on the solution vpt.
 
 	# Bids. All objective function coefficients should be millions of dollars. So a bid of 1 is a bid for $1 million per unit of the chemical.
-	Bapt, Uapt, APT_set, PT_set = read_bids(scenario)
+	Bapt, Uapt, APT_set, PT_set = read_bids(scenario, forestry_price_scale=forestry_price_scale)
+
 	Pollutants = sorted(list(set([p for p,t in PT_set])))
 	BidStepSet = {}
 	for (p,t) in PT_set: BidStepSet[p,t] = []
