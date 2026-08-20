@@ -5,6 +5,7 @@ SMDAMAGE revenue neutral/Output/*.csv
 SMDAMAGE revenue neutral/Output/*.db
 Data/*.lpt
 Data/*.db
+!Data/smdamage_data.db
 
 # Python cache files
 __pycache__/
@@ -12,6 +13,7 @@ __pycache__/
 *$py.class
 
 # Virtual environments
+.venv/
 venv/
 env/
 .env

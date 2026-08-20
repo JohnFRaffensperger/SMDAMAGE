@@ -32,8 +32,8 @@ This document describes the sources and processing steps for the emission and re
 - **Processing**: Max area limited to 48 million sq km; removal rate of ~3.03 tons C/ha/year.
 
 ### Forestry
-- **Primary Source**: Stavins, R. N., & Richards, K. R. (2005). "The cost of US forest-based carbon sequestration." Pew Center on Global Climate Change.
-- **Modern Source**: Busch (2024) SQLite database (`Busch2024_to_SMDAMAGE.sqlite`), which provides clustered bidders, NPVs, and removal schedules for Loblolly pine, Ponderosa pine, and Black walnut.
+- **Source for my 2021 paper**: Stavins, R. N., & Richards, K. R. (2005). "The cost of US forest-based carbon sequestration." Pew Center on Global Climate Change.
+- **Source for my 2026 paper**: Busch (2024) SQLite database (`Busch2024_to_SMDAMAGE.sqlite`), which provides clustered bidders, bids, and carbon schedules.
 
 ## 2. Data Processing and Bid Curve Construction
 
@@ -67,9 +67,7 @@ The bid curves are constructed as piecewise linear functions (step functions) wh
 - **Bid Steps**: **24 steps** in [Seaweed_bids.csv](Data/Seaweed_bids.csv), capping at the global area limit.
 
 ### Forestry Sequestration
-- **Calculation**: Historically based on Stavins & Richards (2005) productivity curves. Modern implementation uses Busch (2024) clustering.
-- **Linearity**: Uses NPV calculations for land rental/opportunity cost; the resulting curves are non-linear but represented as discrete steps.
-- **Bid Steps**: **200 steps** in [Forestry_bid_steps.csv](Data/Forestry_bid_steps.csv). Sequestration schedules include **156 years** of removal data in [Forestry_sequestration.csv](Data/Forestry_sequestration.csv).
+- See the separate Busch forestry project.
 
 ## 3. Plan for prepare_inputs.py
 

@@ -216,7 +216,8 @@ def run_all_experiments ():
 
 	estimate4_ids = run_Short_auctions (Intro_scenario, calibrated_initial_temperature, preferred_tau)
 
-	estimate5_id = run_Dynamic_tau (Intro_scenario, calibrated_initial_temperature, primary_tau)
+	# This is miserable, takes forever, little contribution, works badly.
+	# estimate5_id = run_Dynamic_tau (Intro_scenario, calibrated_initial_temperature, primary_tau)
 
 	db = defaults_and_utilities.getSolutionsDBPath()
 	out = defaults_and_utilities.getOutputDirectory()
